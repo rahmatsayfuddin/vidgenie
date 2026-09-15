@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} — vidgenie</title>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <p><a href="/upload">Upload aset</a></p>
+
+  <form method="get" action="/assets">
+    <label>Tipe
+      <select name="type">
+        <option value="" {% if not type %}selected{% endif %}>Semua</option>
+        <option value="image" {% if type == "image" %}selected{% endif %}>Gambar</option>
+        <option value="video" {% if type == "video" %}selected{% endif %}>Video</option>
+      </select>
+    </label>
+    <label>Status deskripsi
+      <select name="description_status">
+        <option value="" {% if not description_status %}selected{% endif %}>Semua</option>
+        <option value="empty" {% if description_status == "empty" %}selected{% endif %}>Kosong</option>
+        <option value="filled" {% if description_status == "filled" %}selected{% endif %}>Terisi</option>
+      </select>
+    </label>
+    <label>Status embed
+      <select name="embedding_status">
+        <option value="" {% if not embedding_status %}selected{% endif %}>Semua</option>
+        <option value="pending" {% if embedding_status == "pending" %}selected{% endif %}>Pending</option>
+        <option value="ready" {% if embedding_status == "ready" %}selected{% endif %}>Siap</option>
+        <option value="error" {% if embedding_status == "error" %}selected{% endif %}>Error</option>
+      </select>
+    </label>
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if assets %}
+  <ul style="list-style:none; display:flex; flex-wrap:wrap; gap:12px; padding:0">
+    {% for a in assets %}
+    <li style="border:1px solid #ccc; padding:8px; width:170px">
+      <a href="/assets/{{ a.id }}"><img src="/media/thumbs/{{ a.thumb }}" alt="" width="150" height="150" style="object-fit:cover"></a>
+      <div><a href="/assets/{{ a.id }}"><strong>{{ a.filename }}</strong></a></div>
+      <div>Tipe: {{ a.type }}</div>
+      <div>Deskripsi: {{ a.description_status }}{% if a.tags %}; tags: {{ a.tags|join(", ") }}{% endif %}</div>
+      <div>Embed: {{ a.embedding_status }}</div>
+      {% if a.is_searchable %}<div>searchable</div>{% else %}<div>belum searchable</div>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>Belum ada aset{% if type or description_status or embedding_status %} yang cocok dengan filter{% endif %}.</p>
+  {% endif %}
+
+  <p><a href="/">Kembali</a></p>
+</body>
+</html>

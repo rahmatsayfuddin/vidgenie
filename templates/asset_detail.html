@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} — vidgenie</title>
+</head>
+<body>
+  <p><a href="/assets">&larr; Daftar aset</a></p>
+  <h1>{{ asset.filename }}</h1>
+
+  {% if asset.type == "video" %}
+    <video controls src="/media/assets/{{ asset.rel_path }}" style="max-width:320px"></video>
+  {% elif asset.thumb %}
+    <img src="/media/thumbs/{{ asset.thumb }}" alt="preview" style="max-width:320px">
+  {% else %}
+    <img src="/media/assets/{{ asset.rel_path }}" alt="preview" style="max-width:320px">
+  {% endif %}
+
+  <h2>Metadata</h2>
+  <table border="1" cellspacing="0" cellpadding="4">
+    <tr><td>ID</td><td>{{ asset.id }}</td></tr>
+    <tr><td>Tipe</td><td>{{ asset.type }}</td></tr>
+    <tr><td>MIME</td><td>{{ asset.mime }}</td></tr>
+    <tr><td>Ukuran</td><td>{{ asset.size_bytes }} byte</td></tr>
+    <tr><td>Dimensi</td><td>{{ asset.width or "?" }} x {{ asset.height or "?" }}</td></tr>
+    <tr><td>Durasi</td><td>{{ "%.1f s"|format(asset.duration_sec) if asset.duration_sec else "—" }}</td></tr>
+    <tr><td>Status deskripsi</td><td>{{ asset.description_status }}</td></tr>
+    <tr><td>Status embed</td><td>{{ asset.embedding_status }}</td></tr>
+  </table>
+
+  <h2>Deskripsi &amp; tags</h2>
+  <form method="post" action="/assets/{{ asset.id }}">
+    <div>
+      <label>Deskripsi (AI-friendly, bahasa alami)<br>
+        <textarea name="description" rows="6" cols="60">{{ asset.description }}</textarea>
+      </label>
+    </div>
+    <div>
+      <label>Tags (pisahkan dengan koma)<br>
+        <input type="text" name="tags" value="{{ asset.tags|join(", ") }}" size="60">
+      </label>
+    </div>
+    <button type="submit">Simpan</button>
+  </form>
+  <p><a href="/">Home</a></p>
+</body>
+</html>
