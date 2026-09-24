@@ -5,11 +5,38 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
     embedding_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     embedding_dim: int = 384
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-4o-mini"
+    llm_model_fallback: str = ""
+    llm_timeout: float = 60.0
+    llm_max_tokens: int = 1024
+    llm_max_retries: int = 3
 
     @property
     def assets_dir(self) -> Path:
@@ -47,4 +74,11 @@ class Settings:
                 "VIDGENIE_EMBEDDING_MODEL",
                 "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
             ),
+            llm_base_url=os.environ.get("VIDGENIE_LLM_BASE_URL", "https://api.openai.com/v1"),
+            llm_api_key=os.environ.get("VIDGENIE_LLM_API_KEY", ""),
+            llm_model=os.environ.get("VIDGENIE_LLM_MODEL", "gpt-4o-mini"),
+            llm_model_fallback=os.environ.get("VIDGENIE_LLM_MODEL_FALLBACK", ""),
+            llm_timeout=_env_float("VIDGENIE_LLM_TIMEOUT", 60.0),
+            llm_max_tokens=_env_int("VIDGENIE_LLM_MAX_TOKENS", 1024),
+            llm_max_retries=_env_int("VIDGENIE_LLM_MAX_RETRIES", 3),
         )
