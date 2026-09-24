@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  {% if error %}<p style="color: #c00">{{ error }}</p>{% endif %}
+  {% if saved %}<p>Pengaturan tersimpan.</p>{% endif %}
+  <form action="/settings" method="post">
+    <label>Base URL <input type="text" name="base_url" value="{{ values.base_url }}" required></label><br>
+    <label>API key <input type="password" name="api_key" value="" placeholder="{{ api_key_mask or 'kosong' }}" autocomplete="off"></label>
+    {% if api_key_set %}
+      <label><input type="checkbox" name="clear_api_key" value="1"> Hapus API key tersimpan</label>
+      <p>API key tersimpan dan di-mask ({{ api_key_mask }}), tidak ditampilkan.</p>
+    {% endif %}
+    <br>
+    <label>Model <input type="text" name="model" value="{{ values.model }}" required></label><br>
+    <label>Model fallback <input type="text" name="model_fallback" value="{{ values.model_fallback }}"></label><br>
+    <label>Timeout (detik) <input type="text" name="timeout" value="{{ values.timeout }}"></label><br>
+    <label>Max tokens <input type="text" name="max_tokens" value="{{ values.max_tokens }}"></label><br>
+    <label>Max retries <input type="text" name="max_retries" value="{{ values.max_retries }}"></label><br>
+    <button type="submit">Simpan</button>
+  </form>
+  <p><a href="/">Kembali</a></p>
+</body>
+</html>

@@ -10,7 +10,9 @@ from fastapi.templating import Jinja2Templates
 
 from vidgenie import media
 from vidgenie.config import Settings
+from vidgenie.llm import LLMConfig
 from vidgenie.models import Asset
+from vidgenie.settings_store import LLM_KEYS, MASK, SettingsStore, resolve_llm_config
 from vidgenie.storage import Storage
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -30,6 +32,127 @@ def home(request: Request) -> HTMLResponse:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+def _settings_store() -> SettingsStore:
+    return SettingsStore(storage.settings)
+
+
+def _llm_config() -> LLMConfig:
+    return resolve_llm_config(storage.settings, _settings_store())
+
+
+def _settings_context(
+    request: Request,
+    values: dict[str, str],
+    *,
+    saved: bool = False,
+    error: str = "",
+) -> HTMLResponse:
+    stored = _settings_store().all()
+    api_key_set = bool(stored.get("api_key"))
+    for key in ("base_url", "model", "model_fallback", "timeout", "max_tokens", "max_retries"):
+        values[key] = values.get(key, "")
+    return templates.TemplateResponse(
+        request=request,
+        name="settings.html",
+        status_code=400,
+        context={
+            "title": "Pengaturan LLM",
+            "values": values,
+            "api_key_set": api_key_set,
+            "api_key_mask": MASK if api_key_set else "",
+            "saved": saved,
+            "error": error,
+        },
+    )
+
+
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request) -> HTMLResponse:
+    stored = _settings_store().all()
+    values = {key: stored.get(key, "") for key in LLM_KEYS}
+    values["api_key"] = ""
+    return templates.TemplateResponse(
+        request=request,
+        name="settings.html",
+        context={
+            "title": "Pengaturan LLM",
+            "values": values,
+            "api_key_set": bool(stored.get("api_key")),
+            "api_key_mask": MASK if stored.get("api_key") else "",
+            "saved": request.query_params.get("saved") == "1",
+            "error": "",
+        },
+    )
+
+
+@app.post("/settings", response_model=None)
+def settings_save(
+    request: Request,
+    base_url: Annotated[str, Form()] = "",
+    api_key: Annotated[str, Form()] = "",
+    clear_api_key: Annotated[str, Form()] = "",
+    model: Annotated[str, Form()] = "",
+    model_fallback: Annotated[str, Form()] = "",
+    timeout: Annotated[str, Form()] = "",
+    max_tokens: Annotated[str, Form()] = "",
+    max_retries: Annotated[str, Form()] = "",
+) -> HTMLResponse | RedirectResponse:
+    base_url = base_url.strip()
+    model = model.strip()
+    values = {
+        "base_url": base_url,
+        "api_key": "",
+        "model": model,
+        "model_fallback": model_fallback.strip(),
+        "timeout": timeout.strip(),
+        "max_tokens": max_tokens.strip(),
+        "max_retries": max_retries.strip(),
+    }
+
+    error = ""
+    if not base_url:
+        error = "base_url wajib diisi."
+    elif not model:
+        error = "model wajib diisi."
+    elif timeout.strip() and _is_not_float(timeout):
+        error = "timeout harus angka."
+    elif max_tokens.strip() and _is_not_int(max_tokens):
+        error = "max_tokens harus bilangan bulat."
+    elif max_retries.strip() and _is_not_int(max_retries):
+        error = "max_retries harus bilangan bulat."
+    if error:
+        return _settings_context(request, values, error=error)
+
+    to_set = {key: value for key, value in values.items() if value and key != "api_key"}
+    to_delete = [key for key, value in values.items() if key != "api_key" and not value]
+    if clear_api_key == "1":
+        to_delete.append("api_key")
+    elif api_key.strip():
+        to_set["api_key"] = api_key.strip()
+
+    store = _settings_store()
+    store.set_many(to_set)
+    for key in to_delete:
+        store.delete(key)
+    return RedirectResponse(url="/settings?saved=1", status_code=303)
+
+
+def _is_not_float(value: str) -> bool:
+    try:
+        float(value)
+        return False
+    except ValueError:
+        return True
+
+
+def _is_not_int(value: str) -> bool:
+    try:
+        int(value)
+        return False
+    except ValueError:
+        return True
 
 
 @app.get("/upload", response_class=HTMLResponse)

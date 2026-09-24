@@ -18,7 +18,6 @@ Backlog & progress tracker `vidgenie`.
 | ARCH-004 | ~~Modul embedding lokal (CPU) + persist vektor `.npy` + registry id~~ → Done | P1 |
 | ARCH-005 | ~~Modul search cosine (query teks → top-k aset, hanya aset `is_searchable` & embedding `ready`) + test relevansi; query embedding memakai `_query` scene~~ → Done | P1 |
 | ARCH-006 | ~~Modul LLM client (OpenAI-compatible, env `VIDGENIE_LLM_*` + model + fallback kecil; retry eksponensial 429/5xx, timeout, `max_tokens`; parse JSON berlapis: strip fence → regex → fallback model kecil → heuristik pecah kalimat)~~ → Done | P1 |
-| ARCH-007 | Halaman Settings LLM di UI + persist DB; resolve config LLM: DB → env → default; wire `LLMConfig` dari DB saat build | P1 |
 
 ### 🔧 Setup / Infrastructure
 | Key | Judul | Prio |
@@ -62,7 +61,15 @@ Backlog & progress tracker `vidgenie`.
     - Files: `src/vidgenie/llm.py` (`LLMConfig` + `from_settings`, `LLMClient.chat` dengan retry eksponensial 429/5xx + timeout + `max_tokens`, `LLMClient.complete_json` dengan fallback model kecil, `extract_json` berlapis (langsung → strip code fence → regex blok), `plan_scenes` + fallback heuristik pecah kalimat, `Scene`, `LLMError`), `src/vidgenie/config.py` (field `llm_base_url`/`llm_api_key`/`llm_model`/`llm_model_fallback`/`llm_timeout`/`llm_max_tokens`/`llm_max_retries` + helper `_env_float`/`_env_int` + `Settings.from_env` baca env `VIDGENIE_LLM_*`).
     - Tests: `tests/test_llm.py` (13 test; httpx `MockTransport`, tanpa jaringan) — retry 429 sukses, 4xx tanpa retry, give-up setelah `max_retries`, transport error, lapisan `extract_json`, fallback model, clamp durasi 2–12, heuristik, config env.
     - Verifikasi (`.venv` Python 3.14.2, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = applied; `mypy src` = Success, no issues found in 10 source files; `pytest tests/test_llm.py` = **13 passed**; `pytest -q` penuh = **45 passed, 1 failed** (kegagalan pra-eksisting `tests/test_media.py::test_probe_video` — `ffprobe` SIGABRT di lingkungan macOS ini, tidak terkait ARCH-006).
-    - Catatan: field JSON scene memakai `_query` (bukan `_query`) agar konsisten dengan kontrak ARCH-005/FEAT-006; config di-inject (`LLMConfig`) agar nanti bisa disuplai dari halaman Settings DB (task terpisah).
+    - Catatan: field JSON scene memakai `_query`
+- [x] **ARCH-007** — Halaman Settings LLM di UI + persist DB; resolve config LLM: DB → env → default; wire `LLMConfig` dari DB saat build
+  - Evidence:
+    - Files: `src/vidgenie/settings_store.py` (`SettingsStore` SQLite di `vidgenie.db` tabel `settings(key,value)` sesuai SDD §5; `mask_api_key`; `resolve_llm_config` urutan store → env → default), `src/vidgenie/main.py` (`GET /settings` + `POST /settings` + helper `_settings_store`/`_llm_config`; validasi base_url/model wajib & angka; API key di-mask di UI; `clear_api_key` hapus; sukses → 303 `/settings?saved=1`), `templates/settings.html`, `templates/index.html` (link nav), `pyproject.toml` (mypy override `fastembed.*` untuk optional extra `[embedding]`).
+    - Tests (14 PASS): `tests/test_settings_store.py` (set/get/persist lintas reopen/set_many/delete; mask_api_key; resolve: store menang atas settings, empty store → fallback env, store None → settings, angka invalid diabaikan) & `tests/test_settings_page.py` (halaman load; simpan → 303 + persist + `_llm_config` terwire; API key tidak bocor (dicek tidak muncul di HTML) + ditampilkan `********`; blank key pertahankan existing; clear menghapus; angka tidak valid → 400; base_url/model kosong → 400).
+    - Verifikasi (.venv macOS x86_64, Python 3.14.2, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = applied (5 file reformatted, termasuk llm.py gaya PEP 758 py314); `mypy src` = Success, no issues found in 11 source files; `pytest -q` = **60 passed, 1 failed** (kegagalan pra-eksisting `tests/test_media.py::test_probe_video` — ffprobe SIGABRT di lingkungan ini, tidak terkait ARCH-007).
+    - Catatan: persist memakai tabel SQLite `settings` (bukan sidecar JSON, sesuai desain SDD §5); API key tersimpan di DB lokal single-user tapi tidak pernah dirender ke klien maupun di-log UI (cakupan SEC-003 di-backlog).
+
+ (bukan `_query`) agar konsisten dengan kontrak ARCH-005/FEAT-006; config di-inject (`LLMConfig`) agar nanti bisa disuplai dari halaman Settings DB (task terpisah).
 - [x] **SPIKE-001** — Validasi stack embedding lokal di aarch64 + Python 3.14
   - Médium: **`fastembed` + ONNX Runtime** (model `paraphrase-multilingual-MiniLM-L12-v2`, dim 384, ~0.22 GB).
   - Evidence:
