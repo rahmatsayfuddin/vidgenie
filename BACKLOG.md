@@ -30,7 +30,7 @@ Backlog & progress tracker `vidgenie`.
 | FEAT-003 | Halaman `GET /assets/{id}` preview + metadata + editor deskripsi/tags manual | P1 |
 | FEAT-004 | Status deskripsi + aturan "searchable": aset tanpa deskripsi tidak ikut pencarian | P1 |
 | FEAT-005 | Re-embed massal | P2 |
-| FEAT-006 | Plan: LLM pecah narasi → `scene[]{narration (potongan asli, bukan parafrase), search_query (cue visual), duration_sec clamp 2-12}`; few-shot; narasi overlay = `narration` | P1 |
+
 | FEAT-007 | Search per scene + compose (top-k, anti-reuse, fallback caption-only) | P1 |
 | FEAT-008 | Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log` | P1 |
 | FEAT-009 | Halaman build + preview scene + hasil/unduh MP4 + polling status job | P1 |
@@ -53,7 +53,6 @@ Backlog & progress tracker `vidgenie`.
 | — | (kosong; diisi on-demand saat ditemukan selama development) | — |
 
 ## In Progress
-- (kosong)
 
 ## Done
 - [x] **ARCH-006** — Modul LLM client (OpenAI-compatible)
@@ -62,6 +61,15 @@ Backlog & progress tracker `vidgenie`.
     - Tests: `tests/test_llm.py` (13 test; httpx `MockTransport`, tanpa jaringan) — retry 429 sukses, 4xx tanpa retry, give-up setelah `max_retries`, transport error, lapisan `extract_json`, fallback model, clamp durasi 2–12, heuristik, config env.
     - Verifikasi (`.venv` Python 3.14.2, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = applied; `mypy src` = Success, no issues found in 10 source files; `pytest tests/test_llm.py` = **13 passed**; `pytest -q` penuh = **45 passed, 1 failed** (kegagalan pra-eksisting `tests/test_media.py::test_probe_video` — `ffprobe` SIGABRT di lingkungan macOS ini, tidak terkait ARCH-006).
     - Catatan: field JSON scene memakai `_query`
+- [x] **FEAT-006** — Plan: LLM pecah narasi → `scene[]` + simpan ke tabel `scenes` + preview UI
+  - Evidence:
+    - Files: `src/vidgenie/plan.py` (PlanStore SQLite: tabel `plans(id, narration, created_at)` + `scenes(id, plan_id, idx, narration_text, search_query, duration_sec, asset_id, status)` sesuai SDD §5; `plan_scenes(narration, config)` = `LLMClient.plan_scenes`; `new_plan_id`), `src/vidgenie/main.py` (`GET /plan` form + `POST /plan` validasi narasi non-kosong, pakai `_llm_config()` hasil resolve DB, simpan, redirect 303 → `GET /plan/{plan_id}` preview; 404 untuk id tak dikenal), `templates/plan.html` (form narasi), `templates/plan_result.html` (tabel scene: narration verbatim, query visual, durasi), `templates/index.html` (link Rancang scene).
+    - Kontrak scene (dari `llm.plan_scenes`, sudah diverifikasi ARCH-006): `narration` = potongan asli (bukan parafrase), `_query`/search_query = cue visual, `duration_sec` clamp 2–12, few-shot dalam Bahasa Indonesia, fallback heuristik pecah kalimat bila LLM gagal.
+    - Tests (5 PASS): `tests/test_plan.py` — roundtrip PlanStore lintas reopen, form GET, narasi kosong → 400, `POST /plan` → 303 + persist + halaman detail menampilkan narration/query/durasi (LLM di-mock offline), 404 id tidak dikenal.
+    - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 3 file reformatted; `mypy src` = Success, no issues found in 12 source files; `pytest -q` = **65 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Live (uvicorn :8000, konfig deepseek-v4-flash dari settings DB): `POST /plan` narasi 3 kalimat → 303, 3 scene tersimpan di `data/vidgenie.db` (`plans`=1, `scenes`=3), preview menampilkan narasi verbatim + query visual + durasi 4.0/5.0/5.0 s.
+    - Catatan: tabel `scenes` memakai `plan_id` (kolom `job_id` di SDD akan dipakai ARCH-003 saat jobs ada).
+
 - [x] **ARCH-007** — Halaman Settings LLM di UI + persist DB; resolve config LLM: DB → env → default; wire `LLMConfig` dari DB saat build
   - Evidence:
     - Files: `src/vidgenie/settings_store.py` (`SettingsStore` SQLite di `vidgenie.db` tabel `settings(key,value)` sesuai SDD §5; `mask_api_key`; `resolve_llm_config` urutan store → env → default), `src/vidgenie/main.py` (`GET /settings` + `POST /settings` + helper `_settings_store`/`_llm_config`; validasi base_url/model wajib & angka; API key di-mask di UI; `clear_api_key` hapus; sukses → 303 `/settings?saved=1`), `templates/settings.html`, `templates/index.html` (link nav), `pyproject.toml` (mypy override `fastembed.*` untuk optional extra `[embedding]`).

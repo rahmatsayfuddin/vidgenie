@@ -8,10 +8,11 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from vidgenie import media
+from vidgenie import media, plan
 from vidgenie.config import Settings
-from vidgenie.llm import LLMConfig
+from vidgenie.llm import LLMConfig, LLMError
 from vidgenie.models import Asset
+from vidgenie.plan import PlanStore, plan_scenes
 from vidgenie.settings_store import LLM_KEYS, MASK, SettingsStore, resolve_llm_config
 from vidgenie.storage import Storage
 
@@ -153,6 +154,75 @@ def _is_not_int(value: str) -> bool:
         return False
     except ValueError:
         return True
+
+
+@app.get("/plan", response_class=HTMLResponse)
+def plan_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="plan.html",
+        context={"title": "Rancang scene", "narration": ""},
+    )
+
+
+@app.post("/plan", response_model=None)
+def plan_run(
+    request: Request,
+    narration: Annotated[str, Form()] = "",
+) -> HTMLResponse | RedirectResponse:
+    narration = narration.strip()
+    if not narration:
+        return templates.TemplateResponse(
+            request=request,
+            name="plan.html",
+            status_code=400,
+            context={
+                "title": "Rancang scene",
+                "narration": narration,
+                "error": "narasi wajib diisi.",
+            },
+        )
+    try:
+        scenes = plan_scenes(narration, _llm_config())
+    except LLMError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="plan.html",
+            status_code=400,
+            context={"title": "Rancang scene", "narration": narration, "error": str(exc)},
+        )
+    if not scenes:
+        return templates.TemplateResponse(
+            request=request,
+            name="plan.html",
+            status_code=400,
+            context={
+                "title": "Rancang scene",
+                "narration": narration,
+                "error": "tidak ada scene yang dihasilkan.",
+            },
+        )
+    plan_id = plan.new_plan_id()
+    PlanStore(storage.settings).save_scenes(plan_id, narration, scenes)
+    return RedirectResponse(url=f"/plan/{plan_id}", status_code=303)
+
+
+@app.get("/plan/{plan_id}", response_class=HTMLResponse)
+def plan_detail(request: Request, plan_id: str) -> HTMLResponse:
+    data = PlanStore(storage.settings).load_plan(plan_id)
+    if data is None:
+        raise HTTPException(status_code=404)
+    narration, scenes = data
+    return templates.TemplateResponse(
+        request=request,
+        name="plan_result.html",
+        context={
+            "title": "Hasil rancangan",
+            "plan_id": plan_id,
+            "narration": narration,
+            "scenes": scenes,
+        },
+    )
 
 
 @app.get("/upload", response_class=HTMLResponse)

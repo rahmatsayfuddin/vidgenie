@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <p><a href="/plan">Rancang lagi</a></p>
+  <h2>Narasi</h2>
+  <p>{{ narration }}</p>
+  <h2>Scene</h2>
+  <table border="1" cellpadding="6">
+    <tr>
+      <th>#</th>
+      <th>Narasi</th>
+      <th>Query visual</th>
+      <th>Durasi</th>
+    </tr>
+    {% for scene in scenes %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ scene.narration }}</td>
+      <td>{{ scene.search_query }}</td>
+      <td>{{ scene.duration_sec }} s</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p>Plan ID: {{ plan_id }}</p>
+  <p><a href="/">Kembali</a></p>
+</body>
+</html>
