@@ -14,7 +14,7 @@ Backlog & progress tracker `vidgenie`.
 ### 🔷 Architecture
 | Key | Judul | Prio |
 |---|---|---|
-| ARCH-003 | BackgroundWorker (in-process thread pool) + tabel `jobs`; `plan`/`embed`/`render` jalan async, UI polling (step job `planning`) | P1 |
+| ARCH-003 | ~~BackgroundWorker (in-process thread pool) + tabel `jobs`; `plan`/`embed`/`render` jalan async, UI polling (step job `planning`)~~ → Done | P1 |
 | ARCH-004 | ~~Modul embedding lokal (CPU) + persist vektor `.npy` + registry id~~ → Done | P1 |
 | ARCH-005 | ~~Modul search cosine (query teks → top-k aset, hanya aset `is_searchable` & embedding `ready`) + test relevansi; query embedding memakai `_query` scene~~ → Done | P1 |
 | ARCH-006 | ~~Modul LLM client (OpenAI-compatible, env `VIDGENIE_LLM_*` + model + fallback kecil; retry eksponensial 429/5xx, timeout, `max_tokens`; parse JSON berlapis: strip fence → regex → fallback model kecil → heuristik pecah kalimat)~~ → Done | P1 |
@@ -69,6 +69,13 @@ Backlog & progress tracker `vidgenie`.
     - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 3 file reformatted; `mypy src` = Success, no issues found in 12 source files; `pytest -q` = **65 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
     - Live (uvicorn :8000, konfig deepseek-v4-flash dari settings DB): `POST /plan` narasi 3 kalimat → 303, 3 scene tersimpan di `data/vidgenie.db` (`plans`=1, `scenes`=3), preview menampilkan narasi verbatim + query visual + durasi 4.0/5.0/5.0 s.
     - Catatan: tabel `scenes` memakai `plan_id` (kolom `job_id` di SDD akan dipakai ARCH-003 saat jobs ada).
+
+- [x] **ARCH-003** — BackgroundWorker (in-process thread pool) + tabel `jobs`; task `embed` async, UI polling status
+  - Evidence:
+    - Files: `src/vidgenie/worker.py` (`JobStore` SQLite di `vidgenie.db` tabel `jobs(id, kind, status, step, progress, error, video_path, payload, created_at, finished_at)` per SDD §5 — `kind[embed|plan|render]`, `status[queued|running|done|error]`, payload JSON; conn `check_same_thread=False` + lock; `BackgroundWorker` ThreadPoolExecutor (2 thread, prefix `vg-job`), registry task `{"embed": _embed_task}`; `submit` → job_id (KeyError utk kind tak dikenal); `_embed_task`: aset harus ada & `is_searchable` (punya deskripsi) → teks deskripsi+tags → `Embedder` → `save_vector` → `embedding_status=ready` + `embedding_id` → progress 20/60/100), `src/vidgenie/main.py` (`_get_worker()` lazy singleton yg recreate + shutdown saat `db_path` berganti, `POST /assets/{asset_id}/embed` → 202 JSON `{job_id, status: queued}`, `GET /jobs/{job_id}` → JSON status/step/progress/error, 404 untuk id tak dikenal/invalid), `templates/asset_detail.html` (tombol proses embedding, khusus aset sudah punya deskripsi).
+    - Tests (7 PASS): `tests/test_worker.py` — roundtrip JobStore lintas reopen (queued→running→done, progress/step/finished_at, fail set error), worker embed → status done + vektor tersimpan + `embedding_status=ready` + model dipanggil 1× (embedding di-mock via `_load_text_embedding`), aset tanpa deskripsi → job error, kind tak dikenal → KeyError, route `POST /assets/{id}/embed` → 202 + polling `GET /jobs/{id}` sampai done (storage/worker di-monkeypatch ke tmp), 404 (aset/job tak dikenal + id invalid).
+    - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = applied; `mypy src` = Success, no issues found in 13 source files; `pytest -q` = **72 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Catatan lingkungan: mesin ini macOS Intel x86_64 — `fastembed` tak bisa diinstal (onnxruntime tak punya wheel utk tag mesin) → job embed hidup akan berakhir `error` (ImportError); jalur sukses dibuktikan via test mock. `plan`/`render` task masuk jatah FEAT-007/FEAT-008.
 
 - [x] **ARCH-007** — Halaman Settings LLM di UI + persist DB; resolve config LLM: DB → env → default; wire `LLMConfig` dari DB saat build
   - Evidence:

@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from vidgenie import media, plan
@@ -15,6 +15,7 @@ from vidgenie.models import Asset
 from vidgenie.plan import PlanStore, plan_scenes
 from vidgenie.settings_store import LLM_KEYS, MASK, SettingsStore, resolve_llm_config
 from vidgenie.storage import Storage
+from vidgenie.worker import BackgroundWorker, JobStore
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(REPO_ROOT / "templates"))
@@ -41,6 +42,21 @@ def _settings_store() -> SettingsStore:
 
 def _llm_config() -> LLMConfig:
     return resolve_llm_config(storage.settings, _settings_store())
+
+
+_worker: BackgroundWorker | None = None
+_worker_key = ""
+
+
+def _get_worker() -> BackgroundWorker:
+    global _worker, _worker_key
+    key = str(storage.settings.db_path)
+    if _worker is None or _worker_key != key:
+        if _worker is not None:
+            _worker.shutdown()
+        _worker = BackgroundWorker(storage.settings, storage)
+        _worker_key = key
+    return _worker
 
 
 def _settings_context(
@@ -308,6 +324,30 @@ def _load_asset_or_404(asset_id: str) -> Asset:
     if asset is None:
         raise HTTPException(status_code=404)
     return asset
+
+
+JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _job_or_404(job_id: str) -> dict[str, object]:
+    if not JOB_ID_RE.match(job_id):
+        raise HTTPException(status_code=404)
+    job = JobStore(storage.settings).get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404)
+    return job
+
+
+@app.post("/assets/{asset_id}/embed")
+def asset_embed(asset_id: str) -> JSONResponse:
+    _load_asset_or_404(asset_id)
+    job_id = _get_worker().submit("embed", {"asset_id": asset_id})
+    return JSONResponse(content={"job_id": job_id, "status": "queued"}, status_code=202)
+
+
+@app.get("/jobs/{job_id}")
+def job_status(job_id: str) -> JSONResponse:
+    return JSONResponse(content=_job_or_404(job_id))
 
 
 @app.get("/assets/{asset_id}", response_class=HTMLResponse)

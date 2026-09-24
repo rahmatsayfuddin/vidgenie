@@ -43,6 +43,15 @@
     </div>
     <button type="submit">Simpan</button>
   </form>
+  <h2>Embedding vektor</h2>
+  {% if asset.is_searchable %}
+    <form method="post" action="/assets/{{ asset.id }}/embed">
+      <button type="submit">Proses embedding (job async)</button>
+    </form>
+  {% else %}
+    <p>Simpan deskripsi dulu sebelum embed (aset tanpa deskripsi tidak searchable).</p>
+  {% endif %}
+
   <p><a href="/">Home</a></p>
 </body>
 </html>
