@@ -254,8 +254,7 @@ class LLMClient:
                 )
                 return extract_json(raw_fallback)
             except LLMError:
-                raise first_error
-
+                raise first_error from None
     def plan_scenes(self, narration: str) -> list[Scene]:
         text = narration.strip()
         if not text:
