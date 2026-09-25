@@ -16,16 +16,35 @@
       <th>Narasi</th>
       <th>Query visual</th>
       <th>Durasi</th>
+      <th>Aset</th>
+      <th>Skor</th>
+      <th>Status</th>
     </tr>
-    {% for scene in scenes %}
+    {% for row in rows %}
     <tr>
       <td>{{ loop.index }}</td>
-      <td>{{ scene.narration }}</td>
-      <td>{{ scene.search_query }}</td>
-      <td>{{ scene.duration_sec }} s</td>
+      <td>{{ row.narration }}</td>
+      <td>{{ row.search_query }}</td>
+      <td>{{ row.duration_sec }} s</td>
+      <td>
+        {% if row.asset %}
+          <a href="/assets/{{ row.asset.id }}">{{ row.asset.filename }}</a>
+        {% elif row.status == "caption_only" %}
+          (caption saja)
+        {% else %}
+          —
+        {% endif %}
+      </td>
+      <td>
+        {% if row.score is not none %}{{ "%.1f"|format(row.score * 100) }}%{% else %}—{% endif %}
+      </td>
+      <td>{{ row.status }}</td>
     </tr>
     {% endfor %}
   </table>
+  <form method="post" action="/plan/{{ plan_id }}/compose">
+    <button type="submit">Pilih aset untuk setiap scene (compose)</button>
+  </form>
   <p>Plan ID: {{ plan_id }}</p>
   <p><a href="/">Kembali</a></p>
 </body>

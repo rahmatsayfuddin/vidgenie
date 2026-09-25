@@ -5,6 +5,7 @@ import threading
 import uuid
 from datetime import UTC, datetime
 
+from vidgenie.compose import ComposedScene
 from vidgenie.config import Settings
 from vidgenie.llm import LLMClient, LLMConfig, Scene
 
@@ -30,8 +31,12 @@ class PlanStore:
                 "search_query TEXT NOT NULL, "
                 "duration_sec REAL NOT NULL, "
                 "asset_id TEXT, "
+                "score REAL, "
                 "status TEXT NOT NULL DEFAULT 'pending')"
             )
+            cols = {str(r[1]) for r in self._conn.execute("PRAGMA table_info(scenes)").fetchall()}
+            if "score" not in cols:
+                self._conn.execute("ALTER TABLE scenes ADD COLUMN score REAL")
             self._conn.commit()
 
     def save_scenes(self, plan_id: str, narration: str, scenes: list[Scene]) -> None:
@@ -73,6 +78,36 @@ class PlanStore:
                 for r in scene_rows
             ]
             return str(row[0]), scenes
+
+    def save_composition(self, plan_id: str, composed: list[ComposedScene]) -> None:
+        with self._lock:
+            self._conn.executemany(
+                "UPDATE scenes SET asset_id = ?, score = ?, status = ? "
+                "WHERE plan_id = ? AND idx = ?",
+                [(c.asset_id, c.score, c.status, plan_id, c.idx) for c in composed],
+            )
+            self._conn.commit()
+
+    def load_composition(self, plan_id: str) -> dict[int, ComposedScene]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT idx, narration_text, search_query, duration_sec, asset_id, "
+                "score, status FROM scenes WHERE plan_id = ? ORDER BY idx",
+                (plan_id,),
+            ).fetchall()
+        return {
+            int(r[0]): ComposedScene(
+                idx=int(r[0]),
+                narration_text=str(r[1]),
+                search_query=str(r[2]),
+                duration_sec=float(r[3]),
+                caption=str(r[1]),
+                asset_id=str(r[4]) if r[4] is not None else None,
+                score=float(r[5]) if r[5] is not None else None,
+                status=str(r[6]),
+            )
+            for r in rows
+        }
 
     def close(self) -> None:
         with self._lock:

@@ -31,7 +31,7 @@ Backlog & progress tracker `vidgenie`.
 | FEAT-004 | Status deskripsi + aturan "searchable": aset tanpa deskripsi tidak ikut pencarian | P1 |
 | FEAT-005 | Re-embed massal | P2 |
 
-| FEAT-007 | Search per scene + compose (top-k, anti-reuse, fallback caption-only) | P1 |
+| FEAT-007 | ~~Search per scene + compose (top-k, anti-reuse, fallback caption-only)~~ → Done | P1 |
 | FEAT-008 | Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log` | P1 |
 | FEAT-009 | Halaman build + preview scene + hasil/unduh MP4 + polling status job | P1 |
 
@@ -69,6 +69,14 @@ Backlog & progress tracker `vidgenie`.
     - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 3 file reformatted; `mypy src` = Success, no issues found in 12 source files; `pytest -q` = **65 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
     - Live (uvicorn :8000, konfig deepseek-v4-flash dari settings DB): `POST /plan` narasi 3 kalimat → 303, 3 scene tersimpan di `data/vidgenie.db` (`plans`=1, `scenes`=3), preview menampilkan narasi verbatim + query visual + durasi 4.0/5.0/5.0 s.
     - Catatan: tabel `scenes` memakai `plan_id` (kolom `job_id` di SDD akan dipakai ARCH-003 saat jobs ada).
+
+- [x] **FEAT-007** — Search per scene + compose (top-k, anti-reuse, fallback caption-only)
+  - Evidence:
+    - Files: `src/vidgenie/compose.py` (`ComposedScene` + `compose_scenes`: tiap scene → `Searcher.search(search_query, top_k)` → filter `score >= min_score` → pilih skor tertinggi dengan anti-reuse `reuse_gap` (aset dipakai utk scene yg lebih dekat dari `reuse_gap` dilewati; bila tak ada pilihan lain, reuse dibolehkan agar tiap scene tetap ≥1 aset) → tak ada kandidat/skor di bawah threshold → `caption_only` (narasi tampil, aset generic/continue di render)), `src/vidgenie/plan.py` (PlanStore + kolom baru `scenes.score` via `ALTER TABLE` migrasi, `save_composition`/`load_composition` → `dict[int, ComposedScene]`), `src/vidgenie/main.py` (`POST /plan/{plan_id}/compose` → compose + simpan + 303; `GET /plan/{plan_id}` kini merender aset terpilih + skor + status tiap scene), `templates/plan_result.html` (kolom Aset (link ke `/assets/{id}`)/Skor/Status + tombol "Pilih aset untuk setiap scene (compose)").
+    - Tests (7 PASS): `tests/test_compose.py` — pilih skor terbaik + anti-reuse (2 scene, query sama, 2 aset → aset berbeda), reuse diizinkan bila pool kecil (1 aset, 2 scene → keduanya matched, aset sama), skor di bawah threshold → caption_only, tanpa aset (searchable+ready) → caption_only, roundtrip save/load composition via PlanStore, route `POST /plan/{plan_id}/compose` → 303 + detail menampilkan aset & status, 404 plan tak dikenal.
+    - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 3 file reformatted; `mypy src` = Success, no issues found in 14 source files; `pytest -q` = **78 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Live (uvicorn :8000): `POST /plan` (narasi 2 kalimat) → 303; `POST /plan/{id}/compose` → 303; detail menampilkan kedua scene `caption_only` (benar — 1 aset di library belum punya embedding; Searcher hanya mengambil aset `embedding_status=ready`).
+    - Catatan: `render` selanjutnya memakai ComposedScene (`asset_id` + `caption` + `duration_sec`) — masuk FEAT-008.
 
 - [x] **ARCH-003** — BackgroundWorker (in-process thread pool) + tabel `jobs`; task `embed` async, UI polling status
   - Evidence:

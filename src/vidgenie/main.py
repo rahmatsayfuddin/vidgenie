@@ -9,10 +9,13 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 
 from vidgenie import media, plan
+from vidgenie.compose import compose_scenes
 from vidgenie.config import Settings
+from vidgenie.embedding import Embedder
 from vidgenie.llm import LLMConfig, LLMError
 from vidgenie.models import Asset
 from vidgenie.plan import PlanStore, plan_scenes
+from vidgenie.search import Searcher
 from vidgenie.settings_store import LLM_KEYS, MASK, SettingsStore, resolve_llm_config
 from vidgenie.storage import Storage
 from vidgenie.worker import BackgroundWorker, JobStore
@@ -225,10 +228,26 @@ def plan_run(
 
 @app.get("/plan/{plan_id}", response_class=HTMLResponse)
 def plan_detail(request: Request, plan_id: str) -> HTMLResponse:
-    data = PlanStore(storage.settings).load_plan(plan_id)
+    store = PlanStore(storage.settings)
+    data = store.load_plan(plan_id)
     if data is None:
         raise HTTPException(status_code=404)
     narration, scenes = data
+    composed = store.load_composition(plan_id)
+    rows: list[dict[str, object]] = []
+    for idx, scene in enumerate(scenes):
+        entry = composed.get(idx)
+        rows.append(
+            {
+                "narration": scene.narration,
+                "search_query": scene.search_query,
+                "duration_sec": scene.duration_sec,
+                "asset_id": entry.asset_id if entry else None,
+                "score": entry.score if entry else None,
+                "status": entry.status if entry else "pending",
+                "asset": storage.load_asset(entry.asset_id) if entry and entry.asset_id else None,
+            }
+        )
     return templates.TemplateResponse(
         request=request,
         name="plan_result.html",
@@ -236,9 +255,24 @@ def plan_detail(request: Request, plan_id: str) -> HTMLResponse:
             "title": "Hasil rancangan",
             "plan_id": plan_id,
             "narration": narration,
-            "scenes": scenes,
+            "rows": rows,
         },
     )
+
+
+@app.post("/plan/{plan_id}/compose")
+def plan_compose(plan_id: str) -> RedirectResponse:
+    store = PlanStore(storage.settings)
+    data = store.load_plan(plan_id)
+    if data is None:
+        raise HTTPException(status_code=404)
+    narration, scenes = data
+    searcher = Searcher(
+        storage, Embedder(storage.settings.embedding_model, storage.settings.model_cache_dir)
+    )
+    composed = compose_scenes(searcher, scenes)
+    store.save_composition(plan_id, composed)
+    return RedirectResponse(url=f"/plan/{plan_id}", status_code=303)
 
 
 @app.get("/upload", response_class=HTMLResponse)
