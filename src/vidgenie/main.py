@@ -49,6 +49,14 @@ def _llm_config() -> LLMConfig:
 
 _worker: BackgroundWorker | None = None
 _worker_key = ""
+_embedder: Embedder | None = None
+
+
+def _get_embedder() -> Embedder:
+    global _embedder
+    if _embedder is None:
+        _embedder = Embedder(storage.settings.embedding_model, storage.settings.model_cache_dir)
+    return _embedder
 
 
 def _get_worker() -> BackgroundWorker:
@@ -377,6 +385,23 @@ def assets_page(
         "embedding_status": embedding_status or "",
     }
     return templates.TemplateResponse(request=request, name="assets.html", context=context)
+
+
+@app.get("/search", response_class=HTMLResponse)
+def search_page(request: Request, q: str = "", top_k: int = 5) -> HTMLResponse:
+    query = q.strip()
+    results: list[Any] = []
+    error = ""
+    if query:
+        try:
+            results = Searcher(storage, _get_embedder()).search(query, top_k=max(1, min(50, top_k)))
+        except Exception as exc:  # noqa: BLE001 - error model/embedding tampil ke user
+            error = str(exc)
+    return templates.TemplateResponse(
+        request=request,
+        name="search.html",
+        context={"title": "Cari aset", "q": query, "results": results, "error": error},
+    )
 
 
 @app.get("/media/thumbs/{filename}")

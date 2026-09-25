@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }} — vidgenie</title>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <form method="get" action="/search">
+    <label>Cari aset (deskripsi, bahasa alami)<br>
+      <input type="text" name="q" value="{{ q }}" size="50" placeholder="mis. pantai senja dengan ombak">
+    </label>
+    <button type="submit">Cari</button>
+  </form>
+
+  {% if error %}
+    <p style="color:#c00">Error: {{ error }}</p>
+  {% elif q %}
+    {% if results %}
+      <h2>{{ results|length }} aset cocok untuk "{{ q }}"</h2>
+      <ul style="list-style:none; display:flex; flex-wrap:wrap; gap:12px; padding:0">
+        {% for r in results %}
+        <li style="border:1px solid #ccc; padding:8px; width:170px">
+          <a href="/assets/{{ r.asset.id }}"><img src="/media/thumbs/{{ r.asset.thumb }}" alt="" width="150" height="150" style="object-fit:cover"></a>
+          <div><a href="/assets/{{ r.asset.id }}"><strong>{{ r.asset.filename }}</strong></a></div>
+          <div>Skor: {{ "%.2f"|format(r.score) }}</div>
+          <div>{{ r.asset.description[:80] }}{% if r.asset.description|length > 80 %}…{% endif %}</div>
+          {% if r.asset.tags %}<div>tags: {{ r.asset.tags|join(", ") }}</div>{% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>Tidak ada aset searchable yang cocok dengan "{{ q }}".</p>
+    {% endif %}
+  {% else %}
+    <p>Ketik query untuk mencari aset. Hanya aset yang punya deskripsi dan embedding <em>ready</em> yang ikut dicari.</p>
+  {% endif %}
+
+  <p><a href="/">Kembali</a></p>
+</body>
+</html>

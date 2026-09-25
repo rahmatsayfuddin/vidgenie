@@ -30,6 +30,7 @@ Backlog & progress tracker `vidgenie`.
 | FEAT-003 | Halaman `GET /assets/{id}` preview + metadata + editor deskripsi/tags manual | P1 |
 | FEAT-004 | Status deskripsi + aturan "searchable": aset tanpa deskripsi tidak ikut pencarian | P1 |
 | FEAT-005 | Re-embed massal | P2 |
+| FEAT-012 | ~~Halaman search aset (query → daftar aset + skor cosine)~~ → Done | P1 |
 | FEAT-010 | ~~Upload + deskripsi + embed otomatis~~ → Done | P1 |
 | FEAT-011 | ~~Tambah aset via tautan gambar (job import: download → embed)~~ → Done | P1 |
 
@@ -57,6 +58,13 @@ Backlog & progress tracker `vidgenie`.
 ## In Progress
 
 ## Done
+- [x] **FEAT-012** — Halaman search aset (`GET /search` query → daftar aset + skor cosine) | **selesai**
+  - Evidence:
+    - Files: `src/vidgenie/main.py` (`GET /search` — param `q` + `top_k` (clamp 1–50); bila query terisi → `Searcher(storage, _get_embedder()).search(query, top_k)`; `_get_embedder()` lazy singleton `Embedder(model, model_cache_dir)` (model dimuat sekali per proses; error embed → 400-friendly pesan `error` di halaman); render hasil via `templates/search.html`), `templates/search.html` (form query + grid kartu: thumbnail `/media/thumbs/`, link ke `/assets/{id}`, filename, skor `%.2f`, cuplikan deskripsi, tags; empty-state → prompt; `q` tanpa hasil → "Tidak ada aset searchable yang cocok"), `templates/index.html` (nav link "Cari aset").
+    - Tests (6 PASS): `tests/test_search_page.py` — hasil terurut skor desc (2 aset `ready` + vektor berbeda kosinus → urutan benar) + hanya aset searchable & `ready` yang ikut (pending/empty description dieksklusi), skor tampil `1.00`/`0.38`, empty-state query kosong, query tanpa hasil, library kosong, link `/search` di index (embedding di-mock via `_load_text_embedding`).
+    - Verifikasi (.venv Python 3.12.6, ruff 0.16.9 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 38 files already formatted; `mypy src` = Success, no issues found in 15 source files; `pytest -q` = **123 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Live (uvicorn :8000, library nyata): `GET /search?q=matahari%20terbenam%20di%20laut` → 200, 5 aset, ranking kosinus benar — `200.jpg` + `uji_matahari.jpg` skor **0.90** di atas; aset lain (pesepakbola) 0.15/0.14/0.11.
+
 - [x] **FEAT-011** — Tambah aset via tautan gambar (form url+deskripsi → job `import`: download → validasi → simpan → probe/thumb → embed) | **selesai**
   - Evidence:
     - Files: `src/vidgenie/worker.py` (task baru `import` di registry (`JOB_KINDS` + `_tasks`): `_import_task` — muat payload `{url, description, tags}` → progress 5% "mengunduh gambar dari tautan" → `download_image` (httpx stream, timeout 60 s, follow_redirects, UA `vidgenie/1.0`, batas 50 MB via content-length + akumulasi chunk, tipe dari URL → ekstensi/`content-type`, validasi content-type harus image, ekstraksi filename aman berbasis stem+ext) → `save_media` → set description/tags + `description_status=filled` → `probe` (dimensi; bila gambar tak valid → `ValueError "tautan tidak berisi gambar yang valid"`) + `generate_thumbnail` → reuse `_embed_task` (progress 20/60/100 → `embedding_status=ready`) → `store.update_payload({asset_id})`; helper module `validate_import_url` (http/https saja; blokir host `localhost`/`127.0.0.1`/`::1`/`0.0.0.0` + range private 10/172.16/192.168/169.254 via `ipaddress` = anti-SSRF), `JobStore.update_payload` (merge + persist payload JSON), `src/vidgenie/main.py` (`POST /assets/add-link` — url/deskripsi wajib (default `""` → 400 pesan jelas), `validate_import_url` → 400, submit job `import` → 303 `/jobs/{id}/result`; `GET /jobs/{id}/result` kini menghidupkan blok "aset terimpor" (payload `asset_id` → link `/assets/{id}`); `POST /upload` redirect ke `/assets/{id}`), `src/vidgenie/media.py` (dipakai ulang untuk probe/thumb), `templates/upload.html` (form kedua "Tambah dari tautan (gambar)": url + deskripsi wajib + tags; form upload kini punya kolom deskripsi + tags), `templates/job_result.html` (judul & link kontekstual utk job `import`; blok video/scene hanya utk job render).
