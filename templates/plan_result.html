@@ -2,11 +2,11 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <title>{{ title }}</title>
+  <title>{{ title }} — vidgenie</title>
 </head>
 <body>
   <h1>{{ title }}</h1>
-  <p><a href="/plan">Rancang lagi</a></p>
+  <p><a href="/plan">&larr; Rancang lagi</a></p>
   <h2>Narasi</h2>
   <p>{{ narration }}</p>
   <h2>Scene</h2>
@@ -40,11 +40,54 @@
       </td>
       <td>{{ row.status }}</td>
     </tr>
+    <tr>
+      <td colspan="3"></td>
+      <td colspan="4">
+        <details {% if picks.get(loop.index0) %}open{% endif %}>
+          <summary>Ganti aset (scene {{ loop.index }})</summary>
+          <form method="post" action="/plan/{{ plan_id }}/search/{{ loop.index0 }}">
+            <input type="text" name="q" value="{{ row.search_query }}" size="40">
+            <button type="submit">Cari ulang</button>
+          </form>
+          {% if picks.get(loop.index0) %}
+            <form method="post" action="/plan/{{ plan_id }}/scenes/{{ loop.index0 }}/asset">
+              {% for c in picks[loop.index0] %}
+              <label>
+                <input type="radio" name="asset_id" value="{{ c.asset.id }}" required>
+                <img src="/media/thumbs/{{ c.asset.thumb }}" alt="" width="48" height="48" style="object-fit:cover; vertical-align:middle">
+                {{ c.asset.filename }} ({{ "%.1f"|format(c.score * 100) }}%)
+              </label>
+              <br>
+              {% endfor %}
+              <button type="submit">Gunakan aset terpilih</button>
+            </form>
+          {% endif %}
+        </details>
+      </td>
+    </tr>
     {% endfor %}
   </table>
   <form method="post" action="/plan/{{ plan_id }}/compose">
     <button type="submit">Pilih aset untuk setiap scene (compose)</button>
   </form>
+
+  {% if has_composition %}
+  <h2>Render video</h2>
+  <form method="post" action="/plan/{{ plan_id }}/render">
+    <label>Musik
+      <select name="music">
+        <option value="">(tanpa musik / default)</option>
+        {% for t in music_tracks %}
+        <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">Submit render video</button>
+  </form>
+  {% else %}
+  <p>Jalankan <em>compose</em> dulu untuk mengaktifkan render video.</p>
+  {% endif %}
+
   <p>Plan ID: {{ plan_id }}</p>
   <p><a href="/">Kembali</a></p>
 </body>

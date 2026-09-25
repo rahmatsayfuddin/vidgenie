@@ -31,6 +31,8 @@ Backlog & progress tracker `vidgenie`.
 | FEAT-004 | Status deskripsi + aturan "searchable": aset tanpa deskripsi tidak ikut pencarian | P1 |
 | FEAT-005 | Re-embed massal | P2 |
 | FEAT-012 | ~~Halaman search aset (query → daftar aset + skor cosine)~~ → Done | P1 |
+| FEAT-013 | Bulk import aset via tautan (JSONL di textarea → job `import_batch`: download+embed per row, error per-row) | P1 |
+| FEAT-014 | ~~Alur terpadu buat video (/plan → review → compose → ganti aset manual per scene → /plan/{id}/render)~~ → Done | P1 |
 | FEAT-010 | ~~Upload + deskripsi + embed otomatis~~ → Done | P1 |
 | FEAT-011 | ~~Tambah aset via tautan gambar (job import: download → embed)~~ → Done | P1 |
 
@@ -56,8 +58,16 @@ Backlog & progress tracker `vidgenie`.
 | — | (kosong; diisi on-demand saat ditemukan selama development) | — |
 
 ## In Progress
+- (kosong)
 
 ## Done
+- [x] **FEAT-014** — Alur terpadu buat video (/plan → review → compose → ganti aset manual per scene → /plan/{id}/render) | **selesai**
+  - Evidence:
+    - Files: `src/vidgenie/main.py` (route `POST /plan/{plan_id}/render` — validasi plan ada (404) + sudah compose (400 bila belum; deteksi via `_has_composed` = ada scene berstatus non-`pending`) → submit job `render` `{plan_id, music}` → 303 `/jobs/{id}/result`; `POST /plan/{plan_id}/search/{idx}` — pencarian ulang per scene (query `q` opsional, default `search_query` scene; `Searcher(storage, _get_embedder()).search(q, top_k=5)`) → render ulang halaman review dgn blok kandidat inline untuk scene itu (tanpa mutasi komposisi), idx di luar jangkauan/plan tak dikenal → 404, error searcher → 500; `POST /plan/{plan_id}/scenes/{idx}/asset` — ganti aset manual: validasi plan/idx/compose dulu + `asset_id` (regex `ASSET_ID_RE` + `storage.load_asset`) → set `entry.asset_id/status="manual"/score` → `save_composition` → 303 kembali ke `/plan/{plan_id}`, plan/idx tak dikenal 404, belum compose/aset tak ditemukan 400; `_render_plan_result` helper dipakai `plan_detail` & `plan_scene_search` (context + `rows`/`picks`/`has_composition`/`music_tracks`); `_has_composed`; rute `GET/POST /build` **dihapus** (digantikan alur /plan)), `templates/plan_result.html` (tombol "Ganti aset (scene #n)" per baris table (`<details>`) → form pencarian ulang + daftar kandidat radio + thumbnail + skor + tombol "Gunakan aset terpilih"; blok "Render video" dgn `<select>` musik yang hanya muncul setelah compose), `templates/index.html` (nav "Buat video" → `/plan`), `templates/job_result.html` (link "Buat video lain" → `/plan`), `templates/build.html` **dihapus**.
+    - Tests (14 PASS, dirubah/ditambah): `tests/test_build.py` (diadaptasi alur baru — `GET/POST /build` → 404; review sebelum compose menampilkan prompt "Jalankan...compose" tanpa blok render; alur penuh POST /plan → compose → render → job `done` → halaman hasil + `Unduh MP4` + unduh video video/mp4; `POST /render` tanpa compose → 400; `/render` plan tak dikenal → 404; halaman index nav `href="/plan"` tanpa `/build`), `tests/test_plan_pick.py` (baru: kandidat inline per scene tampil + skor, pencarian tanpa mutasi komposisi, pick mengubah komposisi jadi `status=manual` + terpampang di review, upgrade scene caption-only jadi manual dgn score, aset tak dikenal → 400, pick sebelum compose → 400, route idx/plan tak dikenal → 404; embedding di-mock `_load_text_embedding`).
+    - Verifikasi (.venv Python 3.12.6, ruff 0.16.9 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 1 file reformatted; `mypy src` = Success, no issues found in 15 source files; `pytest -q` = **132 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Live (uvicorn :8000, library nyata dgn aset sunset+embedding): `POST /plan` narasi 2 kalimat → plan ad3c74c1...; `POST /plan/{id}/compose` → 303, review kini punya blok render; `POST /plan/{id}/search/0` (q="matahari terbenam di laut") → kandidat inline 5 aset, top skor 90.0% (`99ebadbe...`); `POST /plan/{id}/scenes/0/asset` → 303, status scene jadi `manual`; `POST /plan/{id}/render` → 303 `/jobs/e33d2b6c.../result` → job `done` + `data/outputs/ad3c74c1...mp4` → halaman hasil `Unduh MP4` → video/mp4 48 KB valid.
+
 - [x] **FEAT-012** — Halaman search aset (`GET /search` query → daftar aset + skor cosine) | **selesai**
   - Evidence:
     - Files: `src/vidgenie/main.py` (`GET /search` — param `q` + `top_k` (clamp 1–50); bila query terisi → `Searcher(storage, _get_embedder()).search(query, top_k)`; `_get_embedder()` lazy singleton `Embedder(model, model_cache_dir)` (model dimuat sekali per proses; error embed → 400-friendly pesan `error` di halaman); render hasil via `templates/search.html`), `templates/search.html` (form query + grid kartu: thumbnail `/media/thumbs/`, link ke `/assets/{id}`, filename, skor `%.2f`, cuplikan deskripsi, tags; empty-state → prompt; `q` tanpa hasil → "Tidak ada aset searchable yang cocok"), `templates/index.html` (nav link "Cari aset").

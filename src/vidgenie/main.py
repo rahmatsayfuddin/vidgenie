@@ -242,9 +242,29 @@ def plan_detail(request: Request, plan_id: str) -> HTMLResponse:
         raise HTTPException(status_code=404)
     narration, scenes = data
     composed = store.load_composition(plan_id)
+    store.close()
+    return _render_plan_result(request, plan_id, narration, scenes, composed, None, None)
+
+
+def _has_composed(composed: dict[int, Any] | None) -> bool:
+    if composed is None:
+        return False
+    return any(e.status != "pending" for e in composed.values())
+
+
+def _render_plan_result(
+    request: Request,
+    plan_id: str,
+    narration: str,
+    scenes: list[Any],
+    composed: dict[int, Any] | None,
+    candidates: list[Any] | None,
+    focus_idx: int | None,
+) -> HTMLResponse:
     rows: list[dict[str, object]] = []
+    picks: dict[int, list[Any]] = {}
     for idx, scene in enumerate(scenes):
-        entry = composed.get(idx)
+        entry = composed.get(idx) if composed else None
         rows.append(
             {
                 "narration": scene.narration,
@@ -256,6 +276,8 @@ def plan_detail(request: Request, plan_id: str) -> HTMLResponse:
                 "asset": storage.load_asset(entry.asset_id) if entry and entry.asset_id else None,
             }
         )
+        if candidates is not None and idx == focus_idx:
+            picks[idx] = candidates
     return templates.TemplateResponse(
         request=request,
         name="plan_result.html",
@@ -264,6 +286,9 @@ def plan_detail(request: Request, plan_id: str) -> HTMLResponse:
             "plan_id": plan_id,
             "narration": narration,
             "rows": rows,
+            "picks": picks,
+            "has_composition": _has_composed(composed),
+            "music_tracks": _music_tracks(),
         },
     )
 
@@ -290,70 +315,74 @@ def _music_tracks() -> list[str]:
     return sorted(p.name for p in music_dir.iterdir() if p.is_file())
 
 
-@app.get("/build", response_class=HTMLResponse)
-def build_form(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(
-        request=request,
-        name="build.html",
-        context={"title": "Buat video", "narration": "", "music_tracks": _music_tracks()},
-    )
-
-
-@app.post("/build", response_model=None)
-def build_run(
-    request: Request,
-    narration: Annotated[str, Form()] = "",
-    music: Annotated[str, Form()] = "",
-) -> HTMLResponse | RedirectResponse:
-    narration = narration.strip()
-    if not narration:
-        return templates.TemplateResponse(
-            request=request,
-            name="build.html",
-            status_code=400,
-            context={
-                "title": "Buat video",
-                "narration": narration,
-                "music_tracks": _music_tracks(),
-                "error": "narasi wajib diisi.",
-            },
-        )
-    try:
-        scenes = plan_scenes(narration, _llm_config())
-    except LLMError as exc:
-        return templates.TemplateResponse(
-            request=request,
-            name="build.html",
-            status_code=400,
-            context={
-                "title": "Buat video",
-                "narration": narration,
-                "music_tracks": _music_tracks(),
-                "error": str(exc),
-            },
-        )
-    if not scenes:
-        return templates.TemplateResponse(
-            request=request,
-            name="build.html",
-            status_code=400,
-            context={
-                "title": "Buat video",
-                "narration": narration,
-                "music_tracks": _music_tracks(),
-                "error": "tidak ada scene yang dihasilkan.",
-            },
-        )
-    plan_id = plan.new_plan_id()
+@app.post("/plan/{plan_id}/render")
+def plan_render(plan_id: str, music: Annotated[str, Form()] = "") -> RedirectResponse:
     store = PlanStore(storage.settings)
-    store.save_scenes(plan_id, narration, scenes)
-    searcher = Searcher(
-        storage, Embedder(storage.settings.embedding_model, storage.settings.model_cache_dir)
-    )
-    composed = compose_scenes(searcher, scenes)
-    store.save_composition(plan_id, composed)
+    data = store.load_plan(plan_id)
+    if data is None:
+        raise HTTPException(status_code=404)
+    composed = store.load_composition(plan_id)
+    store.close()
+    if not _has_composed(composed):
+        raise HTTPException(status_code=400, detail="compose dulu sebelum render")
     job_id = _get_worker().submit("render", {"plan_id": plan_id, "music": music.strip() or ""})
     return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
+
+
+@app.post("/plan/{plan_id}/search/{idx}")
+def plan_scene_search(
+    request: Request,
+    plan_id: str,
+    idx: int,
+    q: Annotated[str, Form()] = "",
+) -> HTMLResponse:
+    store = PlanStore(storage.settings)
+    data = store.load_plan(plan_id)
+    if data is None:
+        raise HTTPException(status_code=404)
+    narration, scenes = data
+    if not 0 <= idx < len(scenes):
+        raise HTTPException(status_code=404)
+    query = q.strip() or scenes[idx].search_query
+    candidates: list[Any] = []
+    try:
+        for r in Searcher(storage, _get_embedder()).search(query, top_k=5):
+            candidates.append({"score": r.score, "asset": r.asset})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    composed = store.load_composition(plan_id)
+    store.close()
+    return _render_plan_result(request, plan_id, narration, scenes, composed, candidates, idx)
+
+
+@app.post("/plan/{plan_id}/scenes/{idx}/asset")
+def plan_scene_pick_asset(
+    plan_id: str,
+    idx: int,
+    asset_id: Annotated[str, Form()] = "",
+    score: Annotated[float | None, Form()] = None,
+) -> RedirectResponse:
+    store = PlanStore(storage.settings)
+    data = store.load_plan(plan_id)
+    if data is None:
+        raise HTTPException(status_code=404)
+    _, scenes = data
+    if not 0 <= idx < len(scenes):
+        raise HTTPException(status_code=404)
+    composed = store.load_composition(plan_id)
+    if not _has_composed(composed) or idx not in composed:
+        store.close()
+        raise HTTPException(status_code=400, detail="compose dulu sebelum ganti aset")
+    if not ASSET_ID_RE.match(asset_id) or storage.load_asset(asset_id) is None:
+        store.close()
+        raise HTTPException(status_code=400, detail="aset tidak ditemukan")
+    entry = composed[idx]
+    entry.asset_id = asset_id
+    entry.status = "manual"
+    entry.score = score
+    store.save_composition(plan_id, [composed[i] for i in sorted(composed)])
+    store.close()
+    return RedirectResponse(url=f"/plan/{plan_id}", status_code=303)
 
 
 @app.get("/upload", response_class=HTMLResponse)
