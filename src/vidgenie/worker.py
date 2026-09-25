@@ -19,11 +19,12 @@ import httpx
 from vidgenie.config import Settings
 from vidgenie.embedding import Embedder
 from vidgenie.media import generate_thumbnail, probe
+from vidgenie.models import Asset
 from vidgenie.plan import PlanStore
 from vidgenie.render import render_scenes
 from vidgenie.storage import Storage
 
-JOB_KINDS = ("embed", "plan", "render", "import")
+JOB_KINDS = ("embed", "plan", "render", "import", "import_batch")
 STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
 STATUS_DONE = "done"
@@ -238,6 +239,7 @@ class BackgroundWorker:
             "embed": self._embed_task,
             "render": self._render_task,
             "import": self._import_task,
+            "import_batch": self._import_batch_task,
         }
 
     def submit(self, kind: str, payload: dict[str, Any]) -> str:
@@ -267,22 +269,24 @@ class BackgroundWorker:
         asset = self._storage.load_asset(asset_id)
         if asset is None:
             raise ValueError(f"aset tidak ditemukan: {asset_id}")
+        store.set_progress(job_id, 20, step="embedding")
+        self._embed_asset(asset)
+        store.set_progress(job_id, 100, step="selesai")
+
+    def _embed_asset(self, asset: Asset) -> None:
         if not asset.is_searchable:
-            raise ValueError(f"aset {asset_id} belum punya deskripsi (tidak searchable)")
+            raise ValueError(f"aset {asset.id} belum punya deskripsi (tidak searchable)")
         text = asset.description
         if asset.tags:
             text = f"{text} {' '.join(asset.tags)}"
-        store.set_progress(job_id, 20, step="embedding")
         embedder = Embedder(self._settings.embedding_model, self._settings.model_cache_dir)
         vectors = embedder.embed([text])
         if vectors.shape[0] == 0:
             raise ValueError("embedding menghasilkan vektor kosong")
-        store.set_progress(job_id, 60, step="menyimpan vektor")
         self._storage.save_vector(asset.id, vectors[0])
         asset.embedding_status = "ready"
         asset.embedding_id = asset.id
         self._storage.save_asset(asset)
-        store.set_progress(job_id, 100, step="selesai")
 
     def _render_task(self, store: JobStore, job_id: str, payload: dict[str, Any]) -> None:
         plan_id = str(payload.get("plan_id") or "")
@@ -335,14 +339,26 @@ class BackgroundWorker:
 
         store.set_progress(job_id, 5, step="mengunduh gambar dari tautan")
         data, mime, filename = download_image(url)
-
         store.set_progress(job_id, 15, step="menyimpan aset")
+        asset = self._import_save(data, filename, mime, description, payload.get("tags"))
+        store.set_progress(job_id, 20, step="embedding")
+        self._embed_asset(asset)
+        store.update_payload(job_id, {"asset_id": asset.id})
+        store.set_progress(job_id, 100, step="selesai")
+
+    def _import_save(
+        self,
+        data: bytes,
+        filename: str,
+        mime: str,
+        description: str,
+        tags: object,
+    ) -> Asset:
         try:
             asset = self._storage.save_media(data, filename, mime)
         except ValueError as exc:
             raise ValueError(f"tautan bukan media yang didukung ({filename}): {exc}") from exc
         asset.description = description
-        tags = payload.get("tags")
         if tags:
             asset.tags = [t.strip() for t in str(tags).split(",") if t.strip()]
         asset.description_status = "filled"
@@ -362,9 +378,50 @@ class BackgroundWorker:
         except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError):
             pass
         self._storage.save_asset(asset)
+        return asset
 
-        self._embed_task(store, job_id, {"asset_id": asset.id})
-        store.update_payload(job_id, {"asset_id": asset.id})
+    def _import_batch_task(self, store: JobStore, job_id: str, payload: dict[str, Any]) -> None:
+        lines = [str(r) for r in (payload.get("rows") or [])]
+        if not lines:
+            raise ValueError("tidak ada baris utk diimpor")
+        total = len(lines)
+        results: list[dict[str, Any]] = []
+        for i, line in enumerate(lines):
+            row_no = i + 1
+            store.set_progress(job_id, int(i / total * 95), step=f"baris {row_no}/{total}")
+            try:
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("JSON tidak valid") from exc
+                if not isinstance(obj, dict):
+                    raise ValueError("baris bukan objek JSON")
+                url = str(obj.get("url") or "").strip()
+                description = str(obj.get("description") or "").strip()
+                if not url:
+                    raise ValueError("kolom url kosong")
+                if not description:
+                    raise ValueError("kolom description kosong")
+                validate_import_url(url)
+                data, mime, filename = download_image(url)
+                asset = self._import_save(data, filename, mime, description, obj.get("tags"))
+                self._embed_asset(asset)
+                results.append(
+                    {
+                        "row": row_no,
+                        "ok": True,
+                        "asset_id": asset.id,
+                        "filename": asset.filename,
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 — toleransi error per baris
+                results.append({"row": row_no, "ok": False, "error": str(exc)})
+        ok_count = sum(1 for r in results if r["ok"])
+        store.set_progress(job_id, 100, step="selesai")
+        store.update_payload(
+            job_id,
+            {"results": results, "ok_count": ok_count, "error_count": total - ok_count},
+        )
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False)

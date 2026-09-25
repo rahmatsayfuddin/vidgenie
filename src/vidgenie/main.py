@@ -533,6 +533,38 @@ def asset_add_link(
     return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
 
 
+@app.post("/assets/import-batch", response_model=None)
+def asset_import_batch(
+    request: Request,
+    jsonl: Annotated[str, Form()] = "",
+) -> HTMLResponse | RedirectResponse:
+    lines = [ln.strip() for ln in jsonl.splitlines() if ln.strip()]
+    if not lines:
+        return templates.TemplateResponse(
+            request=request,
+            name="upload.html",
+            status_code=400,
+            context={
+                "title": "Upload aset",
+                "batch_error": "isi JSONL minimal satu baris.",
+                "batch_jsonl": jsonl,
+            },
+        )
+    if len(lines) > 200:
+        return templates.TemplateResponse(
+            request=request,
+            name="upload.html",
+            status_code=400,
+            context={
+                "title": "Upload aset",
+                "batch_error": f"maksimal 200 baris (ada {len(lines)}).",
+                "batch_jsonl": jsonl,
+            },
+        )
+    job_id = _get_worker().submit("import_batch", {"rows": lines})
+    return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
+
+
 @app.post("/assets/{asset_id}/embed")
 def asset_embed(asset_id: str) -> JSONResponse:
     _load_asset_or_404(asset_id)
@@ -564,10 +596,22 @@ def job_result(request: Request, job_id: str) -> HTMLResponse:
     rows: list[dict[str, object]] = []
     narration = ""
     imported_asset = None
+    batch_results: list[dict[str, object]] = []
     if job.get("kind") == "import":
         asset_id = str(job.get("payload", {}).get("asset_id") or "")
         if asset_id:
             imported_asset = storage.load_asset(asset_id)
+    if job.get("kind") == "import_batch":
+        for r in job.get("payload", {}).get("results", []):
+            item: dict[str, object] = {"row": r.get("row"), "ok": r.get("ok") is True}
+            if item["ok"]:
+                asset_id = str(r.get("asset_id") or "")
+                asset = storage.load_asset(asset_id) if asset_id else None
+                item["asset"] = asset
+                item["filename"] = r.get("filename")
+            else:
+                item["error"] = r.get("error")
+            batch_results.append(item)
     if plan_id:
         store = PlanStore(storage.settings)
         data = store.load_plan(plan_id)
@@ -592,13 +636,20 @@ def job_result(request: Request, job_id: str) -> HTMLResponse:
         request=request,
         name="job_result.html",
         context={
-            "title": "Hasil impor aset" if job.get("kind") == "import" else "Hasil video",
+            "title": (
+                "Hasil impor aset"
+                if job.get("kind") in ("import", "import_batch")
+                else "Hasil video"
+            ),
             "job_id": job_id,
             "job": job,
             "plan_id": plan_id,
             "narration": narration,
             "rows": rows,
             "imported_asset": imported_asset,
+            "batch_results": batch_results,
+            "batch_ok": job.get("payload", {}).get("ok_count", 0),
+            "batch_error_count": job.get("payload", {}).get("error_count", 0),
         },
     )
 

@@ -9,7 +9,7 @@
 </head>
 <body>
   <h1>{{ title }}</h1>
-  {% if job.kind == "import" %}
+  {% if job.kind in ("import", "import_batch") %}
     <p><a href="/upload">Tambah aset lain</a> · <a href="/assets">Daftar aset</a></p>
   {% else %}
     <p><a href="/plan">Buat video lain</a></p>
@@ -32,7 +32,33 @@
   <p><a href="/assets/{{ imported_asset.id }}">Lihat &amp; edit aset</a></p>
   {% endif %}
 
-  {% if job.kind != "import" and job.status == "done" %}
+  {% if job.kind == "import_batch" and job.status == "done" %}
+  <h2>Hasil impor massal</h2>
+  <p>{{ batch_ok }} berhasil · {{ batch_error_count }} gagal</p>
+  <table border="1" cellpadding="6">
+    <tr>
+      <th>#</th>
+      <th>Status</th>
+      <th>Detail</th>
+    </tr>
+    {% for r in batch_results %}
+    <tr>
+      <td>{{ r.row }}</td>
+      <td>{{ "berhasil" if r.ok else "gagal" }}</td>
+      <td>
+        {% if r.ok and r.asset %}
+          <a href="/assets/{{ r.asset.id }}">{{ r.filename }}</a>
+          ({{ r.asset.type }} — {{ r.asset.embedding_status }})
+        {% else %}
+          {{ r.error }}
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if job.kind not in ("import", "import_batch") and job.status == "done" %}
   <h2>Video</h2>
   <video controls width="360" src="/jobs/{{ job_id }}/video"></video>
   <p><a href="/jobs/{{ job_id }}/video" download>Unduh MP4</a></p>
