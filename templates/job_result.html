@@ -9,7 +9,11 @@
 </head>
 <body>
   <h1>{{ title }}</h1>
-  <p><a href="/build">Buat video lain</a></p>
+  {% if job.kind == "import" %}
+    <p><a href="/upload">Tambah aset lain</a> · <a href="/assets">Daftar aset</a></p>
+  {% else %}
+    <p><a href="/build">Buat video lain</a></p>
+  {% endif %}
 
   <h2>Status</h2>
   <p>Job: <code>{{ job_id }}</code></p>
@@ -17,7 +21,18 @@
   <progress id="progress" value="{{ job.progress }}" max="100"></progress>
   {% if job.error %}<p style="color: #c00">Error: {{ job.error }}</p>{% endif %}
 
-  {% if job.status == "done" %}
+  {% if job.kind == "import" and job.status == "done" and imported_asset %}
+  <h2>Aset terimpor</h2>
+  <p>
+    <a href="/assets/{{ imported_asset.id }}">
+      {{ imported_asset.filename }}
+    </a>
+    ({{ imported_asset.type }} — {{ imported_asset.embedding_status }})
+  </p>
+  <p><a href="/assets/{{ imported_asset.id }}">Lihat &amp; edit aset</a></p>
+  {% endif %}
+
+  {% if job.kind != "import" and job.status == "done" %}
   <h2>Video</h2>
   <video controls width="360" src="/jobs/{{ job_id }}/video"></video>
   <p><a href="/jobs/{{ job_id }}/video" download>Unduh MP4</a></p>

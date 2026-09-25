@@ -18,7 +18,7 @@ from vidgenie.plan import PlanStore, plan_scenes
 from vidgenie.search import Searcher
 from vidgenie.settings_store import LLM_KEYS, MASK, SettingsStore, resolve_llm_config
 from vidgenie.storage import Storage
-from vidgenie.worker import BackgroundWorker, JobStore
+from vidgenie.worker import BackgroundWorker, JobStore, validate_import_url
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 templates = Jinja2Templates(directory=str(REPO_ROOT / "templates"))
@@ -400,7 +400,11 @@ def media_file(filename: str) -> FileResponse:
 
 
 @app.post("/upload")
-async def upload(file: Annotated[UploadFile, File()]) -> RedirectResponse:
+async def upload(
+    file: Annotated[UploadFile, File()],
+    description: Annotated[str | None, Form()] = None,
+    tags: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
     data = await file.read()
     filename = file.filename or "untitled"
     mime = file.content_type or ""
@@ -408,6 +412,12 @@ async def upload(file: Annotated[UploadFile, File()]) -> RedirectResponse:
         asset = storage.save_media(data, filename, mime)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if description and description.strip():
+        asset.description = description.strip()
+        if tags:
+            asset.tags = [t.strip() for t in tags.split(",") if t.strip()]
+        asset.description_status = "filled"
+        storage.save_asset(asset)
     try:
         width, height, duration = media.probe(storage.media_path(asset), asset.type)
         asset.width, asset.height, asset.duration_sec = width, height, duration
@@ -418,7 +428,9 @@ async def upload(file: Annotated[UploadFile, File()]) -> RedirectResponse:
         storage.save_asset(asset)
     except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError):
         pass
-    return RedirectResponse(url="/assets", status_code=303)
+    if asset.is_searchable:
+        _get_worker().submit("embed", {"asset_id": asset.id})
+    return RedirectResponse(url=f"/assets/{asset.id}", status_code=303)
 
 
 ASSET_ID_RE = re.compile(r"^[0-9a-f]{32}$")
@@ -443,6 +455,28 @@ def _job_or_404(job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404)
     return job
+
+
+@app.post("/assets/add-link")
+def asset_add_link(
+    url: Annotated[str, Form()] = "",
+    description: Annotated[str, Form()] = "",
+    tags: Annotated[str | None, Form()] = None,
+) -> RedirectResponse:
+    url = url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL wajib diisi")
+    try:
+        validate_import_url(url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not description.strip():
+        raise HTTPException(status_code=400, detail="Deskripsi wajib diisi")
+    payload: dict[str, Any] = {"url": url, "description": description.strip()}
+    if tags:
+        payload["tags"] = tags
+    job_id = _get_worker().submit("import", payload)
+    return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
 
 
 @app.post("/assets/{asset_id}/embed")
@@ -475,6 +509,11 @@ def job_result(request: Request, job_id: str) -> HTMLResponse:
     plan_id = str(job.get("payload", {}).get("plan_id") or "")
     rows: list[dict[str, object]] = []
     narration = ""
+    imported_asset = None
+    if job.get("kind") == "import":
+        asset_id = str(job.get("payload", {}).get("asset_id") or "")
+        if asset_id:
+            imported_asset = storage.load_asset(asset_id)
     if plan_id:
         store = PlanStore(storage.settings)
         data = store.load_plan(plan_id)
@@ -499,12 +538,13 @@ def job_result(request: Request, job_id: str) -> HTMLResponse:
         request=request,
         name="job_result.html",
         context={
-            "title": "Hasil video",
+            "title": "Hasil impor aset" if job.get("kind") == "import" else "Hasil video",
             "job_id": job_id,
             "job": job,
             "plan_id": plan_id,
             "narration": narration,
             "rows": rows,
+            "imported_asset": imported_asset,
         },
     )
 

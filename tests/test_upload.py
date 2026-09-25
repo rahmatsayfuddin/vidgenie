@@ -16,6 +16,15 @@ def _jpg_bytes() -> bytes:
     return buf.getvalue()
 
 
+class _FakeWorker:
+    def __init__(self) -> None:
+        self.jobs: list[tuple[str, dict]] = []
+
+    def submit(self, kind: str, payload: dict) -> str:
+        self.jobs.append((kind, payload))
+        return "0" * 32
+
+
 def test_upload_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     st = Storage(Settings(data_dir=tmp_path))
     monkeypatch.setattr(main, "storage", st)
@@ -27,11 +36,8 @@ def test_upload_image(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         follow_redirects=False,
     )
     assert resp.status_code == 303
-    assert resp.headers["location"] == "/assets"
-
-    assets = st.list_assets()
-    assert len(assets) == 1
-    asset = assets[0]
+    asset = st.list_assets()[0]
+    assert resp.headers["location"] == f"/assets/{asset.id}"
     assert asset.type == "image"
     assert asset.width == 64
     assert asset.height == 48
@@ -57,3 +63,50 @@ def test_upload_form_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     resp = client.get("/upload")
     assert resp.status_code == 200
     assert 'action="/upload"' in resp.text
+    assert "Tambah dari tautan" in resp.text
+    assert 'action="/assets/add-link"' in resp.text
+
+
+def test_upload_with_description_auto_embed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    st = Storage(Settings(data_dir=tmp_path))
+    fw = _FakeWorker()
+    monkeypatch.setattr(main, "storage", st)
+    monkeypatch.setattr(main, "_get_worker", lambda: fw)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/upload",
+        files={"file": ("pantai.jpg", _jpg_bytes(), "image/jpeg")},
+        data={"description": "pantai senja dengan ombak", "tags": "senja, laut"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    asset = st.list_assets()[0]
+    assert resp.headers["location"] == f"/assets/{asset.id}"
+    assert asset.description_status == "filled"
+    assert asset.description == "pantai senja dengan ombak"
+    assert asset.tags == ["senja", "laut"]
+    assert fw.jobs == [("embed", {"asset_id": asset.id})]
+
+
+def test_upload_without_description_no_embed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    st = Storage(Settings(data_dir=tmp_path))
+    fw = _FakeWorker()
+    monkeypatch.setattr(main, "storage", st)
+    monkeypatch.setattr(main, "_get_worker", lambda: fw)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/upload",
+        files={"file": ("pantai.jpg", _jpg_bytes(), "image/jpeg")},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    asset = st.list_assets()[0]
+    assert resp.headers["location"] == f"/assets/{asset.id}"
+    assert asset.description_status == "empty"
+    assert fw.jobs == []

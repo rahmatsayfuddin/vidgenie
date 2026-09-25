@@ -1,26 +1,112 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import sqlite3
+import subprocess
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+import httpx
 
 from vidgenie.config import Settings
 from vidgenie.embedding import Embedder
+from vidgenie.media import generate_thumbnail, probe
 from vidgenie.plan import PlanStore
 from vidgenie.render import render_scenes
 from vidgenie.storage import Storage
 
-JOB_KINDS = ("embed", "plan", "render")
+JOB_KINDS = ("embed", "plan", "render", "import")
 STATUS_QUEUED = "queued"
 STATUS_RUNNING = "running"
 STATUS_DONE = "done"
 STATUS_ERROR = "error"
+
+_IMPORT_TIMEOUT = 60.0
+_IMPORT_MAX_BYTES = 50 * 1024 * 1024
+_IMPORT_BLOCKED_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+_IMPORT_PRIVATE_NETS = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+)
+
+_IMPORT_MIME_EXT = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/bmp": ".bmp",
+    "image/avif": ".avif",
+}
+
+
+def validate_import_url(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("URL wajib http/https")
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("URL tidak punya host")
+    if host in _IMPORT_BLOCKED_HOSTS:
+        raise ValueError("host tidak diizinkan (suplai internal)")
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None and (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved):
+        raise ValueError("alamat IP tidak diizinkan (private/loopback)")
+    for net in _IMPORT_PRIVATE_NETS:
+        if ip is not None and ip in net:
+            raise ValueError("alamat IP tidak diizinkan (private)")
+
+
+def download_image(url: str) -> tuple[bytes, str, str]:
+    parsed = urlparse(url)
+    base = Path(parsed.path).name or "gambar"
+    data = bytearray()
+    content_type = ""
+    with httpx.stream(
+        "GET",
+        url,
+        timeout=_IMPORT_TIMEOUT,
+        follow_redirects=True,
+        headers={"User-Agent": "vidgenie/1.0"},
+    ) as resp:
+        if resp.status_code != 200:
+            raise ValueError(f"download gagal: HTTP {resp.status_code}")
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+        total = int(resp.headers.get("content-length") or 0)
+        if total > _IMPORT_MAX_BYTES:
+            raise ValueError("ukuran file melebihi batas 50 MB")
+        for chunk in resp.iter_bytes(chunk_size=64 * 1024):
+            data.extend(chunk)
+            if len(data) > _IMPORT_MAX_BYTES:
+                raise ValueError("ukuran file melebihi batas 50 MB")
+    ext = Path(base).suffix.lower()
+    stem = Path(base).stem or "gambar"
+    use_ct_ext = False
+    if ext not in {*_IMPORT_MIME_EXT.values()} and content_type in _IMPORT_MIME_EXT:
+        ext = _IMPORT_MIME_EXT[content_type]
+        use_ct_ext = True
+    if ext not in {*_IMPORT_MIME_EXT.values()}:
+        raise ValueError(f"tautan tidak punya ekstensi gambar yang dikenali ({base})")
+    if use_ct_ext or not Path(base).suffix.lower():
+        filename = f"{stem}{ext}"
+    else:
+        filename = base
+    if content_type not in _IMPORT_MIME_EXT and "image" not in content_type:
+        raise ValueError(f"content-type bukan gambar: {content_type or 'kosong'}")
+    return bytes(data), content_type, filename
 
 
 class JobStore:
@@ -125,6 +211,19 @@ class JobStore:
             )
             self._conn.commit()
 
+    def update_payload(self, job_id: str, update: dict[str, Any]) -> None:
+        existing = self.get(job_id)
+        if existing is None:
+            return
+        payload = dict(existing.get("payload") or {})
+        payload.update(update)
+        with self._lock:
+            self._conn.execute(
+                "UPDATE jobs SET payload = ? WHERE id = ?",
+                (json.dumps(payload), job_id),
+            )
+            self._conn.commit()
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()
@@ -138,6 +237,7 @@ class BackgroundWorker:
         self._tasks: dict[str, Callable[[JobStore, str, dict[str, Any]], None]] = {
             "embed": self._embed_task,
             "render": self._render_task,
+            "import": self._import_task,
         }
 
     def submit(self, kind: str, payload: dict[str, Any]) -> str:
@@ -223,6 +323,48 @@ class BackgroundWorker:
             for path in sorted(self._settings.music_dir.glob(ext)):
                 return path
         return None
+
+    def _import_task(self, store: JobStore, job_id: str, payload: dict[str, Any]) -> None:
+        url = str(payload.get("url") or "").strip()
+        description = str(payload.get("description") or "").strip()
+        if not url:
+            raise ValueError("url wajib di payload import")
+        if not description:
+            raise ValueError("deskripsi wajib di payload import")
+        validate_import_url(url)
+
+        store.set_progress(job_id, 5, step="mengunduh gambar dari tautan")
+        data, mime, filename = download_image(url)
+
+        store.set_progress(job_id, 15, step="menyimpan aset")
+        try:
+            asset = self._storage.save_media(data, filename, mime)
+        except ValueError as exc:
+            raise ValueError(f"tautan bukan media yang didukung ({filename}): {exc}") from exc
+        asset.description = description
+        tags = payload.get("tags")
+        if tags:
+            asset.tags = [t.strip() for t in str(tags).split(",") if t.strip()]
+        asset.description_status = "filled"
+        asset.updated_at = time.time()
+        self._storage.save_asset(asset)
+
+        try:
+            width, height, duration = probe(self._storage.media_path(asset), asset.type)
+        except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+            raise ValueError("tautan tidak berisi gambar yang valid") from exc
+        asset.width, asset.height, asset.duration_sec = width, height, duration
+        try:
+            generate_thumbnail(
+                self._storage.media_path(asset), asset.type, self._storage.thumb_path(asset.id)
+            )
+            asset.thumb = self._storage.thumb_path(asset.id).name
+        except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError):
+            pass
+        self._storage.save_asset(asset)
+
+        self._embed_task(store, job_id, {"asset_id": asset.id})
+        store.update_payload(job_id, {"asset_id": asset.id})
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False)
