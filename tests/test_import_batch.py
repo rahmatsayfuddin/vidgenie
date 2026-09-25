@@ -1,4 +1,5 @@
 import io
+import json
 import time
 from pathlib import Path
 
@@ -200,12 +201,89 @@ def test_import_batch_route_validation(tmp_path: Path, monkeypatch: pytest.Monke
     client, fw = _client(tmp_path, monkeypatch)
     resp = client.post("/assets/import-batch", data={"jsonl": "  \n\t\n"})
     assert resp.status_code == 400
-    assert "minimal satu baris" in resp.text
+    assert "minimal satu objek" in resp.text
 
     lines = "\n".join(
         [f'{{"url": "https://example.com/{i}.jpg", "description": "x{i}"}}' for i in range(201)]
     )
     resp = client.post("/assets/import-batch", data={"jsonl": lines})
+    assert resp.status_code == 400
+    assert "200" in resp.text
+    assert fw.jobs == []
+
+
+def test_import_batch_route_accepts_json_array(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, fw = _client(tmp_path, monkeypatch)
+    pretty = """[
+  {
+    "url": "https://example.com/a.jpg",
+    "description": "pantai senja",
+    "tags": "pantai,senja"
+  },
+  {
+    "url": "https://example.com/b.jpg",
+    "description": "gunung berkabut"
+  }
+]"""
+    resp = client.post("/assets/import-batch", data={"jsonl": pretty}, follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"/jobs/{'2' * 32}/result"
+    assert len(fw.jobs) == 1
+    kind, payload = fw.jobs[0]
+    assert kind == "import_batch"
+    assert payload["rows"] == [
+        '{"url": "https://example.com/a.jpg", "description": "pantai senja", '
+        '"tags": "pantai,senja"}',
+        '{"url": "https://example.com/b.jpg", "description": "gunung berkabut"}',
+    ]
+
+
+def test_import_batch_route_accepts_single_object(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, fw = _client(tmp_path, monkeypatch)
+    resp = client.post(
+        "/assets/import-batch",
+        data={"jsonl": '{"url": "https://example.com/a.jpg", "description": "satu", "tags": "x"}'},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    assert fw.jobs[0][1]["rows"] == [
+        '{"url": "https://example.com/a.jpg", "description": "satu", "tags": "x"}'
+    ]
+
+
+def test_import_batch_route_json_array_invalid_element(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, fw = _client(tmp_path, monkeypatch)
+    resp = client.post(
+        "/assets/import-batch",
+        data={"jsonl": '[{"url": "https://example.com/a.jpg", "description": "x"}, "bukan-objek"]'},
+    )
+    assert resp.status_code == 400
+    assert "elemen ke-2 bukan objek JSON" in resp.text
+    assert fw.jobs == []
+
+
+def test_import_batch_route_empty_array_and_scalar(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, fw = _client(tmp_path, monkeypatch)
+    for bad in ("[]", '"abc"', "123"):
+        resp = client.post("/assets/import-batch", data={"jsonl": bad})
+        assert resp.status_code == 400, bad
+    assert fw.jobs == []
+
+
+def test_import_batch_route_json_array_over_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, fw = _client(tmp_path, monkeypatch)
+    items = [{"url": f"https://example.com/{i}.jpg", "description": f"x{i}"} for i in range(201)]
+    resp = client.post("/assets/import-batch", data={"jsonl": json.dumps(items)})
     assert resp.status_code == 400
     assert "200" in resp.text
     assert fw.jobs == []

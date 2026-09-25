@@ -47,12 +47,15 @@
     <button type="submit">Tambah via tautan</button>
   </form>
 
-  <h2>Tambah massal dari tautan (JSONL)</h2>
+  <h2>Tambah massal dari tautan (JSON)</h2>
   <form action="/assets/import-batch" method="post">
     <div>
-      <label>Baris JSONL (satu per baris; maksimal 200)<br>
-        <textarea name="jsonl" rows="6" cols="72"
-          placeholder='{"url": "https://.../a.jpg", "description": "pantai senja", "tags": "pantai,senja"}'>{{ batch_jsonl or "" }}</textarea>
+      <label>Isi array objek JSON (boleh indentasi/multi-baris, maksimal 200) — atau JSONL (1 objek per baris):<br>
+        <textarea name="jsonl" rows="8" cols="72"
+          placeholder='[
+  {"url": "https://.../a.jpg", "description": "pantai senja", "tags": "pantai,senja"},
+  {"url": "https://.../b.jpg", "description": "gunung di pagi hari", "tags": "gunung"}
+]'>{{ batch_jsonl or "" }}</textarea>
       </label>
     </div>
     {% if batch_error %}<p style="color: #c00">{{ batch_error }}</p>{% endif %}

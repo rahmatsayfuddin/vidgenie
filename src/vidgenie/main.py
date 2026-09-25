@@ -533,35 +533,58 @@ def asset_add_link(
     return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
 
 
+def _import_batch_rows(jsonl: str) -> list[str]:
+    raw = jsonl.strip()
+    if not raw:
+        raise ValueError("isi JSON atau JSONL minimal satu objek.")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+    if isinstance(data, dict):
+        return [json.dumps(data)]
+    if not isinstance(data, list):
+        raise ValueError("isi berupa array objek JSON atau JSONL (bukan nilai tunggal).")
+    rows: list[str] = []
+    for i, item in enumerate(data):
+        if not isinstance(item, dict):
+            raise ValueError(f"elemen ke-{i + 1} bukan objek JSON (butuh url + description).")
+        rows.append(json.dumps(item))
+    if not rows:
+        raise ValueError("isi JSON minimal satu objek.")
+    return rows
+
+
 @app.post("/assets/import-batch", response_model=None)
 def asset_import_batch(
     request: Request,
     jsonl: Annotated[str, Form()] = "",
 ) -> HTMLResponse | RedirectResponse:
-    lines = [ln.strip() for ln in jsonl.splitlines() if ln.strip()]
-    if not lines:
+    try:
+        rows = _import_batch_rows(jsonl)
+    except ValueError as exc:
         return templates.TemplateResponse(
             request=request,
             name="upload.html",
             status_code=400,
             context={
                 "title": "Upload aset",
-                "batch_error": "isi JSONL minimal satu baris.",
+                "batch_error": str(exc),
                 "batch_jsonl": jsonl,
             },
         )
-    if len(lines) > 200:
+    if len(rows) > 200:
         return templates.TemplateResponse(
             request=request,
             name="upload.html",
             status_code=400,
             context={
                 "title": "Upload aset",
-                "batch_error": f"maksimal 200 baris (ada {len(lines)}).",
+                "batch_error": f"maksimal 200 baris (ada {len(rows)}).",
                 "batch_jsonl": jsonl,
             },
         )
-    job_id = _get_worker().submit("import_batch", {"rows": lines})
+    job_id = _get_worker().submit("import_batch", {"rows": rows})
     return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
 
 

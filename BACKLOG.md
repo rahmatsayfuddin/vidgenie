@@ -34,6 +34,7 @@ Backlog & progress tracker `vidgenie`.
 | FEAT-013 | ~~Bulk import aset via tautan (JSONL di textarea → job `import_batch`: download+embed per row, error per-row)~~ → Done | P1 |
 | FEAT-014 | ~~Alur terpadu buat video (/plan → review → compose → ganti aset manual per scene → /plan/{id}/render)~~ → Done | P1 |
 | FEAT-015 | ~~GIF selalu diperlakukan sebagai video pendek (animasi hidup di MP4): klasifikasi `video`, probe/thumb via Pillow, render `-stream_loop`~~ → Done | P1 |
+| FEAT-016 | ~~Import batch menerima JSON array (common JSON, padat/pretty-print) atau objek tunggal; JSONL lama tetap didukung~~ → Done | P1 |
 | FEAT-010 | ~~Upload + deskripsi + embed otomatis~~ → Done | P1 |
 | FEAT-011 | ~~Tambah aset via tautan gambar (job import: download → embed)~~ → Done | P1 |
 
@@ -62,6 +63,12 @@ Backlog & progress tracker `vidgenie`.
 - (kosong)
 
 ## Done
+- [x] **FEAT-016** — Import batch menerima JSON array (common JSON) atau objek tunggal; JSONL lama tetap didukung | **selesai**
+  - Evidence:
+    - Files: `src/vidgenie/main.py` (`asset_import_batch` kini memakai helper `_import_batch_rows(jsonl)` — `json.loads` dulu: **list** → tiap elemen wajib `dict` (elemen bukan objek → 400 `"elemen ke-N bukan objek JSON (butuh url + description)."`), rows = `json.dumps(item)` per elemen (normalisasi ke string JSON compact sehingga `worker._import_batch_task` tanpa perubahan); **dict** (objek tunggal) → 1 baris; scalar → 400 `"isi berupa array objek JSON atau JSONL (bukan nilai tunggal)."`; `[]` → 400 `"isi JSON minimal satu objek."`; `JSONDecodeError` → **fallback JSONL** persis behavior lama (splitlines → per-row); input kosong → 400 `"isi JSON atau JSONL minimal satu objek."`; batas >200 baris/elemen tetap), `templates/upload.html` (judul "Tambah massal dari tautan (JSON)", label menjelaskan array objek JSON (indentasi/multi-baris bebas) atau JSONL, placeholder contoh array multi-baris, `batch_error`/`batch_jsonl` tetap repopulate).
+    - Tests (5 PASS baru = 155 total): `tests/test_import_batch.py` — route array pretty-print 2 objek → 303 + payload `rows` dinormalisasi jadi 2 string JSON compact; objek tunggal → 1 row; array berisi elemen non-objek → 400 "elemen ke-2 bukan objek JSON"; array kosong + scalar (`[]`, `"abc"`, `123`) → 400 tanpa submit; array 201 item → 400 "200"; pesan validasi kosong diupdate ("minimal satu objek"); `_client`/`_CaptureWorker` dipakai ulang.
+    - Verifikasi (.venv Python 3.12.6, ruff 0.16.9 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 1 file reformatted; `mypy src` = Success, no issues found in 15 source files; `pytest -q` = **150 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Live (uvicorn :8000): `POST /assets/import-batch` memakai array JSON pretty-print persis format user (3 objek GIF giphy) → 303 → job `done`, hasil **3 berhasil · 0 gagal**; aset terimpor `giphy.gif` (`type=video` via FEAT-015, durasi 2.0 s, deskripsi tersimpan), halaman hasil menampilkan ringkasan.
 - [x] **FEAT-015** — GIF selalu diperlakukan sebagai video pendek (animasi hidup di MP4) | **selesai**
   - Evidence:
     - Files: `src/vidgenie/storage.py` (`.gif` dipindah `IMAGE_EXT` → `VIDEO_EXT` → `detect_media_type("x.gif")` = `video`; MIME tetap `image/gif` → seluruh pipeline ikut jalur video), `src/vidgenie/media.py` (`probe` — untuk ext `.gif` tidak pakai ffprobe (SIGABRT): `Pillow` frame 0 utk dimensi + `_estimate_gif_duration` = `n_frames × duration-ms` (fallback 100 ms), frame tunggal → `duration None`; `generate_thumbnail` — GIF via Pillow frame 0, bukan ffmpeg `-ss 1`), `src/vidgenie/render.py` (`_segment_cmd` jalur video: input `.gif` → tambah `-stream_loop -1` sebelum `-i` agar animasi di-loop dan `trim=duration=scene` menghasilkan segmen sepanjang durasi scene; scale/crop/setsar/trim/setpts/fps/drawtext/`-an` tetap), `templates/asset_detail.html` (preview GIF via `<img>` (`asset.type == "video"` + `mime == "image/gif"`), bukan `<video>`; `FileResponse` otomatis serve `image/gif`), `BACKLOG.md`.
