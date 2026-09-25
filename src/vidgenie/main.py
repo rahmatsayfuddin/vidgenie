@@ -416,7 +416,7 @@ async def upload(file: Annotated[UploadFile, File()]) -> RedirectResponse:
         )
         asset.thumb = storage.thumb_path(asset.id).name
         storage.save_asset(asset)
-    except OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError:
+    except (OSError, ValueError, subprocess.CalledProcessError, json.JSONDecodeError):
         pass
     return RedirectResponse(url="/assets", status_code=303)
 

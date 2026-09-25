@@ -140,12 +140,12 @@ Narasi teks bebas
 - LLM helper (draft dari metadata/filename lalu direview) hanya dipertimbangkan di v2 — tetap non-vision.
 
 ### 7.2 embed (lokal CPU)
-- **Runtime (hasil SPIKE-001): `fastembed` (ONNX Runtime)** — wheel `onnxruntime 1.30.0 cp314-manylinux_2_28_aarch64` tersedia dan terverifikasi berjalan di aarch64 + Python 3.14.
+- **Runtime (hasil SPIKE-001 + ARCH-008): `fastembed` (ONNX Runtime)** — model `paraphrase-multilingual-MiniLM-L12-v2` jalan di CPU via onnxruntime. Catatan mesin: di macOS Intel x86_64, onnxruntime hanya tersedia untuk Python ≤3.12 (`1.23.2` di py312) → runtime proyek ditetapkan **Python 3.12** (ARCH-008).
 - **Model: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`** (dim 384, ~0.22 GB, multilingual ≈50 bahasa termasuk Indonesia). Terverifikasi: relevansi Indonesia bagus, throughput ≈30 doc/s CPU.
 - Catatan: `intfloat/multilingual-e5-small` (target draft lama) **tidak** didukung fastembed; `multilingual-e5-large` (2.24 GB) terlalu berat untuk v1.
 - Model di-cache ke direktori data proyek (parameter `cache_dir`), bukan default user home.
 - Persist vektor sebagai `float32` (output fastembed `float64` → cast saat menyimpan `.npy`).
-- Fallback (bila fastembed bermasalah di mesin tertentu): `sentence-transformers` via torch — wheel `torch cp314-manylinux_2_28_aarch64` juga ada di PyPI (2.14.0), tapi berat (instal ~GB); gunakan hanya jika perlu.
+- Fallback (bila fastembed bermasalah di mesin tertentu): `sentence-transformers` via torch, tapi berat (instal ~GB); gunakan hanya jika perlu.
 - Query embedding dihasilkan dari teks narasi scene; dokumen embedding dari deskripsi+tag aset.
 
 ### 7.3 plan + search
@@ -171,17 +171,17 @@ Pillow/ffmpeg menghasilkan `thumbs/<id>.jpg` untuk preview daftar aset & preview
 
 ## 8. Stack & dependensi
 
-- Runtime: Python (sistem 3.14; wheel embedding tersedia untuk 3.14 — SPIKE-001).
+- Runtime: Python 3.12 (syarat onnxruntime di macOS Intel x86_64 — ARCH-008; sebelumnya 3.14 di aarch64).
 - Dep inti: `fastapi`, `uvicorn`, `jinja2`, `python-multipart`, `httpx`, `pydantic`, `numpy`, `Pillow`.
 - Embedding: **`fastembed`** (ONNX Runtime) + model `paraphrase-multilingual-MiniLM-L12-v2`; fallback `sentence-transformers` (torch) bila perlu.
-- Sistem: `ffmpeg` (via `apt-get install ffmpeg`).
+- Sistem: `ffmpeg` (via Homebrew di macOS: binary render jalan; `ffprobe` SIGABRT di mesin ini — jangan andalkan ffprobe di test).
 - LLM: interface OpenAI-compatible, key via env (`VIDGENIE_LLM_BASE_URL`, `VIDGENIE_LLM_API_KEY`); model utama (`VIDGENIE_LLM_MODEL`, default ringan) + model fallback lebih kecil (`VIDGENIE_LLM_MODEL_FALLBACK`) via config.
 
 ## 9. Risiko & mitigasi
 
 | Risiko | Mitigasi |
 |---|---|
-| Wheel embedding aarch64 + Python 3.14 tidak tersedia | **TERVERIFIKASI ADA (SPIKE-001)**: `fastembed`+`onnxruntime 1.30.0` cp314-aarch64 jalan; model multilingual dipilih; fallback torch cp314-aarch64 juga tersedia. Abstraksi `embedding.py` tetap dipisah agar swap model/runtime mudah |
+| Wheel embedding aarch64/Python X tidak tersedia | **TERVERIFIKASI ADA**: di aarch64+py314 (SPIKE-001) dan macOS Intel+py312 (ARCH-008) — `fastembed`+`onnxruntime` jalan, model multilingual dipilih, fallback torch tersedia. Abstraksi `embedding.py` tetap dipisah agar swap model/runtime mudah |
 | `filter_complex` rumit & mudah salah | Bangun renderer iteratif: scene tunggal → multi-scene → +teks → +musik; log ffmpeg detail; flag dry-run untuk melihat command |
 | JavaSript vanilla berantakan | Pisah per halaman `<script>` kecil; komunikasi via API endpoint + polling status |
 | LLM output tidak valid JSON (plan) / rate limit / timeout | Parse defensif berlapis: strip fence → regex → fallback model kecil → heuristik pecah kalimat; retry eksponensial hanya untuk 429/5xx; timeout & `max_tokens` per request |

@@ -3,7 +3,7 @@
 ## Status
 - Repo `vidgenie`: sudah ada scaffolding awal (`pyproject.toml`, `src/vidgenie/`, `tests/`) + dokumentasi (`AGENTS.md`, `BACKLOG.md`, `SDD.md`). **BACKLOG.md khusus task development — jangan diupdate untuk task dokumentasi/planning.**
 - Arah produk: aplikasi **web** yang menyusun video dari library asset (gambar/video) berbasis **RAG atas deskripsi asset AI-friendly**; editing lokal via **ffmpeg**.
-- Lingkungan: aarch64 (ARM64) Kali Linux; **tanpa GPU (CUDA tidak tersedia)**; Python 3.14.6; `node`, `uv`, `go` belum terinstall; `git`/`pip`/`venv`/`apt`/`docker`/`curl` tersedia; `ffmpeg` sudah terpasang. Dokumentasi desain: `SDD.md`.
+- Lingkungan (ARCH-008): **macOS Intel x86_64, tanpa GPU**; Python **3.12.6** (syarat agar `fastembed`/onnxruntime tersedia — onnxruntime tidak punya wheel utk cp314 mac-intel); `git`/`pip`/`venv`/`curl`/`uv` tersedia; `ffmpeg` 8.1_1 via Homebrew (binary `ffmpeg` jalan, `ffprobe` SIGABRT di mesin ini → jangan andalkan ffprobe dlm test). Dokumentasi desain: `SDD.md`.
 
 ## Keputusan arsitektur (lihat SDD.md)
 - **Web app**: backend FastAPI + Uvicorn (localhost, single-user v1), frontend server-rendered Jinja2 + vanilla JS — **tanpa node/build step**.
@@ -25,9 +25,9 @@
 - Run app (belum ada; rencana): `uvicorn src.vidgenie.main:app --reload`
 
 ## Setup (sudah dieksekusi)
-- `apt-get install ffmpeg` — sudah terpasang (`ffmpeg 8.1.2`).
-- Venv proyek: `.venv` (Python 3.14.6) — `source .venv/bin/activate` sebelum bekerja.
-- Dep inti + dev (`fastapi`, `uvicorn`, `jinja2`, `python-multipart`, `httpx`, `pydantic`, `numpy`, `Pillow`, `pytest`, `ruff`, `mypy`) terinstall; `fastembed` belum — masuk jatah `ARCH-004`.
+- `apt-get install ffmpeg` — tidak relevan di macOS; `ffmpeg` 8.1_1 via Homebrew (terpasang).
+- Venv proyek: `.venv` (Python 3.12.6) — `source .venv/bin/activate` sebelum bekerja.
+- Dep inti + dev + embedding (`fastapi`, `uvicorn`, `jinja2`, `python-multipart`, `httpx`, `pydantic`, `numpy`, `Pillow`, `pytest`, `ruff`, `mypy`, `fastembed`+`onnxruntime`) terinstall via `pip install -e ".[dev,embedding]"`.
 - App FastAPI berjalan (`uvicorn src.vidgenie.main:app --reload`), modul `storage.py`/`config.py`/`models.py` sudah ada.
 
 ## Konvensi

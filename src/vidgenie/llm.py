@@ -60,7 +60,7 @@ def extract_json(text: str) -> Any:
     stripped = text.strip()
     try:
         return json.loads(stripped)
-    except json.JSONDecodeError, ValueError:
+    except (json.JSONDecodeError, ValueError):
         pass
 
     candidate = stripped
@@ -69,14 +69,14 @@ def extract_json(text: str) -> Any:
         candidate = fence.group(1).strip()
         try:
             return json.loads(candidate)
-        except json.JSONDecodeError, ValueError:
+        except (json.JSONDecodeError, ValueError):
             pass
 
     block = _BLOCK_RE.search(candidate)
     if block:
         try:
             return json.loads(block.group(1))
-        except json.JSONDecodeError, ValueError:
+        except (json.JSONDecodeError, ValueError):
             pass
 
     raise LLMError("output LLM bukan JSON yang valid")
@@ -85,7 +85,7 @@ def extract_json(text: str) -> Any:
 def _clamp_duration(value: Any) -> float:
     try:
         number = float(value)
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         return DEFAULT_DURATION
     return max(MIN_DURATION, min(MAX_DURATION, number))
 
