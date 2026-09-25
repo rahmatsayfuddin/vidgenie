@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+  <style>
+    progress { width: 100%; }
+  </style>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  <p><a href="/build">Buat video lain</a></p>
+
+  <h2>Status</h2>
+  <p>Job: <code>{{ job_id }}</code></p>
+  <p id="status-line">Status: {{ job.status }} — {{ job.step or "—" }} ({{ job.progress }}%)</p>
+  <progress id="progress" value="{{ job.progress }}" max="100"></progress>
+  {% if job.error %}<p style="color: #c00">Error: {{ job.error }}</p>{% endif %}
+
+  {% if job.status == "done" %}
+  <h2>Video</h2>
+  <video controls width="360" src="/jobs/{{ job_id }}/video"></video>
+  <p><a href="/jobs/{{ job_id }}/video" download>Unduh MP4</a></p>
+  {% endif %}
+
+  {% if narration %}
+  <h2>Narasi</h2>
+  <p>{{ narration }}</p>
+  {% endif %}
+
+  {% if rows %}
+  <h2>Scene</h2>
+  <table border="1" cellpadding="6">
+    <tr>
+      <th>#</th>
+      <th>Narasi</th>
+      <th>Query visual</th>
+      <th>Durasi</th>
+      <th>Aset</th>
+      <th>Status</th>
+    </tr>
+    {% for row in rows %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ row.narration }}</td>
+      <td>{{ row.search_query }}</td>
+      <td>{{ row.duration_sec }} s</td>
+      <td>
+        {% if row.asset %}
+          <a href="/assets/{{ row.asset.id }}">{{ row.asset.filename }}</a>
+        {% else %}
+          (caption saja)
+        {% endif %}
+      </td>
+      <td>{{ row.status }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  <p><a href="/">Kembali</a></p>
+
+  <script>
+    var jobId = "{{ job_id }}";
+    var done = {{ "true" if job.status == "done" or job.status == "error" else "false" }};
+    function refresh() {
+      fetch("/jobs/" + jobId)
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          document.getElementById("status-line").textContent =
+            "Status: " + j.status + " — " + (j.step || "—") + " (" + j.progress + "%)";
+          document.getElementById("progress").value = j.progress;
+          if (j.status === "done" || j.status === "error") {
+            window.location.reload();
+          }
+        });
+    }
+    if (!done) {
+      setInterval(refresh, 2000);
+    }
+  </script>
+</body>
+</html>

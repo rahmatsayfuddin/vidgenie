@@ -2,7 +2,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -275,6 +275,79 @@ def plan_compose(plan_id: str) -> RedirectResponse:
     return RedirectResponse(url=f"/plan/{plan_id}", status_code=303)
 
 
+def _music_tracks() -> list[str]:
+    music_dir = storage.settings.music_dir
+    if not music_dir.exists():
+        return []
+    return sorted(p.name for p in music_dir.iterdir() if p.is_file())
+
+
+@app.get("/build", response_class=HTMLResponse)
+def build_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="build.html",
+        context={"title": "Buat video", "narration": "", "music_tracks": _music_tracks()},
+    )
+
+
+@app.post("/build", response_model=None)
+def build_run(
+    request: Request,
+    narration: Annotated[str, Form()] = "",
+    music: Annotated[str, Form()] = "",
+) -> HTMLResponse | RedirectResponse:
+    narration = narration.strip()
+    if not narration:
+        return templates.TemplateResponse(
+            request=request,
+            name="build.html",
+            status_code=400,
+            context={
+                "title": "Buat video",
+                "narration": narration,
+                "music_tracks": _music_tracks(),
+                "error": "narasi wajib diisi.",
+            },
+        )
+    try:
+        scenes = plan_scenes(narration, _llm_config())
+    except LLMError as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="build.html",
+            status_code=400,
+            context={
+                "title": "Buat video",
+                "narration": narration,
+                "music_tracks": _music_tracks(),
+                "error": str(exc),
+            },
+        )
+    if not scenes:
+        return templates.TemplateResponse(
+            request=request,
+            name="build.html",
+            status_code=400,
+            context={
+                "title": "Buat video",
+                "narration": narration,
+                "music_tracks": _music_tracks(),
+                "error": "tidak ada scene yang dihasilkan.",
+            },
+        )
+    plan_id = plan.new_plan_id()
+    store = PlanStore(storage.settings)
+    store.save_scenes(plan_id, narration, scenes)
+    searcher = Searcher(
+        storage, Embedder(storage.settings.embedding_model, storage.settings.model_cache_dir)
+    )
+    composed = compose_scenes(searcher, scenes)
+    store.save_composition(plan_id, composed)
+    job_id = _get_worker().submit("render", {"plan_id": plan_id, "music": music.strip() or ""})
+    return RedirectResponse(url=f"/jobs/{job_id}/result", status_code=303)
+
+
 @app.get("/upload", response_class=HTMLResponse)
 def upload_form(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -363,7 +436,7 @@ def _load_asset_or_404(asset_id: str) -> Asset:
 JOB_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
-def _job_or_404(job_id: str) -> dict[str, object]:
+def _job_or_404(job_id: str) -> dict[str, Any]:
     if not JOB_ID_RE.match(job_id):
         raise HTTPException(status_code=404)
     job = JobStore(storage.settings).get(job_id)
@@ -382,6 +455,58 @@ def asset_embed(asset_id: str) -> JSONResponse:
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str) -> JSONResponse:
     return JSONResponse(content=_job_or_404(job_id))
+
+
+@app.get("/jobs/{job_id}/video")
+def job_video(job_id: str) -> FileResponse:
+    job = _job_or_404(job_id)
+    video_path = job.get("video_path")
+    if job.get("status") != "done" or not video_path:
+        raise HTTPException(status_code=404)
+    path = Path(str(video_path))
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    return FileResponse(path, media_type="video/mp4")
+
+
+@app.get("/jobs/{job_id}/result", response_class=HTMLResponse)
+def job_result(request: Request, job_id: str) -> HTMLResponse:
+    job = _job_or_404(job_id)
+    plan_id = str(job.get("payload", {}).get("plan_id") or "")
+    rows: list[dict[str, object]] = []
+    narration = ""
+    if plan_id:
+        store = PlanStore(storage.settings)
+        data = store.load_plan(plan_id)
+        if data is not None:
+            narration, scenes = data
+            composed = store.load_composition(plan_id)
+            for idx, scene in enumerate(scenes):
+                entry = composed.get(idx)
+                rows.append(
+                    {
+                        "idx": idx,
+                        "narration": scene.narration,
+                        "search_query": scene.search_query,
+                        "duration_sec": scene.duration_sec,
+                        "status": entry.status if entry else "pending",
+                        "asset": (
+                            storage.load_asset(entry.asset_id) if entry and entry.asset_id else None
+                        ),
+                    }
+                )
+    return templates.TemplateResponse(
+        request=request,
+        name="job_result.html",
+        context={
+            "title": "Hasil video",
+            "job_id": job_id,
+            "job": job,
+            "plan_id": plan_id,
+            "narration": narration,
+            "rows": rows,
+        },
+    )
 
 
 @app.get("/assets/{asset_id}", response_class=HTMLResponse)

@@ -201,7 +201,7 @@ class BackgroundWorker:
 
         dest = self._settings.outputs_dir / f"{plan_id}.mp4"
         dest.parent.mkdir(parents=True, exist_ok=True)
-        music = self._first_music()
+        music = self._select_music(payload)
         store.set_progress(job_id, 25, step="render tiap scene")
         result = render_scenes(self._storage, composed, dest, music_path=music)
         if not result.ok:
@@ -209,6 +209,14 @@ class BackgroundWorker:
         store.set_progress(job_id, 95, step="menyimpan hasil")
         if result.output is not None:
             store.finish(job_id, video_path=str(result.output), step="selesai")
+
+    def _select_music(self, payload: dict[str, Any]) -> Path | None:
+        name = str(payload.get("music") or "")
+        if name:
+            candidate = self._settings.music_dir / Path(name).name
+            if candidate.exists():
+                return candidate
+        return self._first_music()
 
     def _first_music(self) -> Path | None:
         for ext in ("*.mp3", "*.m4a", "*.wav", "*.ogg"):

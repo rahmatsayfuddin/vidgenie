@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title }}</title>
+</head>
+<body>
+  <h1>{{ title }}</h1>
+  {% if error %}<p style="color: #c00">{{ error }}</p>{% endif %}
+  <form action="/build" method="post">
+    <label>Narasi<br>
+      <textarea name="narration" rows="8" cols="70" required>{{ narration }}</textarea>
+    </label>
+    <br><br>
+    <label>Musik latar
+      <select name="music">
+        <option value="">(tanpa musik)</option>
+        {% for track in music_tracks %}
+        <option value="{{ track }}">{{ track }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <br><br>
+    <button type="submit">Buat video</button>
+  </form>
+  <p><a href="/">Kembali</a></p>
+</body>
+</html>

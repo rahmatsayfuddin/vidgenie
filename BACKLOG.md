@@ -33,7 +33,7 @@ Backlog & progress tracker `vidgenie`.
 
 | FEAT-007 | ~~Search per scene + compose (top-k, anti-reuse, fallback caption-only)~~ → Done | P1 |
 | FEAT-008 | ~~Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log`~~ → Done | P1 |
-| FEAT-009 | Halaman build + preview scene + hasil/unduh MP4 + polling status job | P1 |
+| FEAT-009 | ~~Halaman build + preview scene + hasil/unduh MP4 + polling status job~~ → Done | P1 |
 
 ### 🛡️ Security
 | Key | Judul | Prio |
@@ -70,6 +70,11 @@ Backlog & progress tracker `vidgenie`.
     - Live (uvicorn :8000, konfig deepseek-v4-flash dari settings DB): `POST /plan` narasi 3 kalimat → 303, 3 scene tersimpan di `data/vidgenie.db` (`plans`=1, `scenes`=3), preview menampilkan narasi verbatim + query visual + durasi 4.0/5.0/5.0 s.
     - Catatan: tabel `scenes` memakai `plan_id` (kolom `job_id` di SDD akan dipakai ARCH-003 saat jobs ada).
 
+- [x] **FEAT-009** — Halaman build (`GET /build` form), `POST /build` plan+compose+submit render job, halaman hasil (`/jobs/{id}/result` polling 2 s + pemutar video + unduh MP4) | **selesai**
+  - Evidence:
+    - Files: `src/vidgenie/main.py` (`GET /build` form narasi + pilihan track musik; `POST /build` narasi wajib non-kosong → plan (LLM) → compose (search) → submit job `render` payload `{plan_id, music}` → 303 `/jobs/{id}/result`; error LLM → re-render form 400; `GET /jobs/{job_id}` JSON polling; `GET /jobs/{id}/video` → FileResponse MP4 (khusus status `done`); `GET /jobs/{id}/result` halaman berisi status/progress, table scene (narasi, query, durasi, aset terpakai, status), pemutar video + tombol unduh), `src/vidgenie/worker.py` (`_select_music`: pakai track musik dari payload bila cocok, else `_first_music`), `templates/build.html` (form narasi + `<select>` musik), `templates/job_result.html` (progress bar + polling JS `setInterval` 2 s + `<video>` + unduh), `templates/index.html` (link "Buat video").
+    - Tests (5 PASS): `tests/test_build.py` — GET form, narasi kosong → 400, alur penuh POST → 303 `/jobs/{id}/result` → job `done` (render ffmpeg nyata, embedding di-mock via `_load_text_embedding`) → halaman hasil + MP4 ter-unduh (content-type video/mp4, >0 byte), 404 id/plan tak dikenal, `/jobs/{id}/video` belum `done` → 404.
+    - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = applied; `mypy src` = Success, no issues found in 15 source files; `pytest -q` = **92 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT di macOS).
 - [x] **FEAT-008** — Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log`
   - Evidence:
     - Files: `src/vidgenie/render.py` (`render_scenes`/`render_scene`: per-scene segmen MP4 720x1280@30fps via `_segment_cmd` — image/placeholder → loop+zoompan slow-zoom, video → scale/crop center + trim `duration_sec` + `fps`; narasi per scene via `drawtext=textfile` (file caption per segmen, posisi bawah emulated `w/h` style configurable); `_final_cmd` — gabung segmen dgn xfade fade 0.3s (offset kumulatif durasi−crossfade), audio: musik → `volume=0.15`+`atrim` total durasi, tanpa musik → `anullsrc` silent; encode h264 yuv420p + aac `-shortest`; error → tulis `render.log` berisi command + stderr), `src/vidgenie/config.py` (`outputs_dir` = `data/outputs`, `music_dir` = `data/assets/music` + `ensure_dirs`), `src/vidgenie/worker.py` (task `render` di BackgroundWorker: payload `{plan_id}` → muat PlanStore.composition → `render_scenes` → `finish(job_id, video_path=...)`).
