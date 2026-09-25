@@ -9,8 +9,10 @@
   <p><a href="/assets">&larr; Daftar aset</a></p>
   <h1>{{ asset.filename }}</h1>
 
-  {% if asset.type == "video" %}
+  {% if asset.type == "video" and asset.mime != "image/gif" %}
     <video controls src="/media/assets/{{ asset.rel_path }}" style="max-width:320px"></video>
+  {% elif asset.type == "video" and asset.mime == "image/gif" %}
+    <img src="/media/assets/{{ asset.rel_path }}" alt="preview" style="max-width:320px">
   {% elif asset.thumb %}
     <img src="/media/thumbs/{{ asset.thumb }}" alt="preview" style="max-width:320px">
   {% else %}

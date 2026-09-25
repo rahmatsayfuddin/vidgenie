@@ -62,6 +62,12 @@ def test_segment_cmd_video_uses_trim(tmp_path: Path) -> None:
     assert "drawtext=textfile=" in joined
 
 
+def _gif(path: Path, n_frames: int = 4) -> Path:
+    frames = [Image.new("RGB", (160, 280), (40 * i, 30 * i, 20)) for i in range(n_frames)]
+    frames[0].save(path, "GIF", save_all=True, append_images=frames[1:], duration=120, loop=0)
+    return path
+
+
 def test_segment_cmd_image_uses_zoompan(tmp_path: Path) -> None:
     img = _img(tmp_path / "i.jpg")
     pid = _scene(0, "caption", 4.0)
@@ -77,6 +83,30 @@ def test_segment_cmd_caption_only_placeholder(tmp_path: Path) -> None:
     cmd = _segment_cmd(pid, None, None, tmp_path / "c.txt", tmp_path / "s.mp4")
     joined = " ".join(cmd)
     assert "placeholder.png" in joined
+
+
+def test_segment_cmd_gif_loops_stream(tmp_path: Path) -> None:
+    gif = _gif(tmp_path / "a.gif")
+    pid = _scene(0, "caption", 4.0)
+    cmd = _segment_cmd(pid, gif, "video", tmp_path / "c.txt", tmp_path / "s.mp4")
+    joined = " ".join(cmd)
+    assert "-stream_loop -1" in joined
+    assert "-i " + str(gif) in joined
+    assert "trim=duration=4" in joined
+    assert "fps=30" in joined
+
+
+def test_render_scenes_gif_end_to_end(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    gif = _gif(tmp_path / "a.gif")
+    asset = storage.save_media(gif.read_bytes(), "a.gif", "image/gif")
+    assert asset.type == "video"
+    scenes = [_scene(0, "Animasi bergerak.", 2.0, asset.id)]
+    dest = tmp_path / "out" / "v.mp4"
+    result = render_scenes(storage, scenes, dest)
+    assert result.ok, result.log
+    assert result.output is not None
+    assert result.output.exists() and result.output.stat().st_size > 0
 
 
 def test_final_cmd_single_and_multi(tmp_path: Path) -> None:

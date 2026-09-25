@@ -10,8 +10,8 @@ import numpy as np
 from vidgenie.config import Settings
 from vidgenie.models import Asset
 
-IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".avif"}
-VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v"}
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".avif"}
+VIDEO_EXT = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".gif"}
 
 
 def detect_media_type(filename: str) -> str:

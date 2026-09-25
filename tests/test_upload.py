@@ -91,6 +91,34 @@ def test_upload_with_description_auto_embed(
     assert fw.jobs == [("embed", {"asset_id": asset.id})]
 
 
+def _gif_bytes(n_frames: int = 3) -> bytes:
+    frames = [Image.new("RGB", (64, 48), (30 * i, 20 * i, 10)) for i in range(n_frames)]
+    buf = io.BytesIO()
+    frames[0].save(buf, "GIF", save_all=True, append_images=frames[1:], duration=100, loop=0)
+    return buf.getvalue()
+
+
+def test_upload_gif_treated_as_video(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    st = Storage(Settings(data_dir=tmp_path))
+    monkeypatch.setattr(main, "storage", st)
+    client = TestClient(main.app)
+
+    resp = client.post(
+        "/upload",
+        files={"file": ("anim.gif", _gif_bytes(), "image/gif")},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 303
+    asset = st.list_assets()[0]
+    assert asset.type == "video"
+    assert asset.mime == "image/gif"
+    assert asset.width == 64
+    assert asset.height == 48
+    assert asset.duration_sec is not None and abs(asset.duration_sec - 0.3) < 0.05
+    assert asset.thumb == f"{asset.id}.jpg"
+    assert st.thumb_path(asset.id).exists()
+
+
 def test_upload_without_description_no_embed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

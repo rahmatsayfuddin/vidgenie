@@ -57,9 +57,13 @@ def _segment_cmd(
             f"trim=duration={_fmt(composed.duration_sec)},setpts=PTS-STARTPTS,fps={FPS},"
             f"{_drawtext(cap_path)},format=yuv420p"
         )
-        return [
+        cmd = [
             "ffmpeg",
             "-y",
+        ]
+        if asset_path.suffix.lower() == ".gif":
+            cmd += ["-stream_loop", "-1"]
+        cmd += [
             "-i",
             str(asset_path),
             "-filter_complex",
@@ -73,6 +77,7 @@ def _segment_cmd(
             "23",
             str(seg_path),
         ]
+        return cmd
     vf = (
         f"[0:v]scale=1440:2560:force_original_aspect_ratio=increase,"
         f"crop=1440:2560,setsar=1,"

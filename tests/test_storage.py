@@ -14,6 +14,7 @@ def storage(tmp_path: Path) -> Storage:
 
 def test_detect_media_type() -> None:
     assert detect_media_type("foto.JPG") == "image"
+    assert detect_media_type("gambar.gif") == "video"
     assert detect_media_type("klip.mp4") == "video"
     with pytest.raises(ValueError):
         detect_media_type("data.txt")

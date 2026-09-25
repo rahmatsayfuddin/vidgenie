@@ -9,10 +9,21 @@ from PIL import Image, ImageOps
 THUMB_SIZE = (320, 320)
 
 
+def _estimate_gif_duration(img: Image.Image) -> float | None:
+    frame_ms = float(img.info.get("duration") or 100)
+    n_frames = int(getattr(img, "n_frames", 1))
+    if n_frames <= 1:
+        return None
+    return n_frames * frame_ms / 1000.0
+
+
 def probe(path: Path, asset_type: str) -> tuple[int | None, int | None, float | None]:
     if asset_type == "image":
         with Image.open(path) as img:
             return img.width, img.height, None
+    if path.suffix.lower() == ".gif":
+        with Image.open(path) as img:
+            return img.width, img.height, _estimate_gif_duration(img)
     return _probe_video(path)
 
 
@@ -43,7 +54,7 @@ def _probe_video(path: Path) -> tuple[int | None, int | None, float | None]:
 
 def generate_thumbnail(path: Path, asset_type: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if asset_type == "image":
+    if asset_type == "image" or path.suffix.lower() == ".gif":
         with Image.open(path) as img:
             ImageOps.fit(img.convert("RGB"), THUMB_SIZE, method=Image.Resampling.LANCZOS).save(
                 dest, "JPEG", quality=80
