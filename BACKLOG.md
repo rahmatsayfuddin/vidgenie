@@ -32,7 +32,7 @@ Backlog & progress tracker `vidgenie`.
 | FEAT-005 | Re-embed massal | P2 |
 
 | FEAT-007 | ~~Search per scene + compose (top-k, anti-reuse, fallback caption-only)~~ → Done | P1 |
-| FEAT-008 | Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log` | P1 |
+| FEAT-008 | ~~Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log`~~ → Done | P1 |
 | FEAT-009 | Halaman build + preview scene + hasil/unduh MP4 + polling status job | P1 |
 
 ### 🛡️ Security
@@ -69,6 +69,13 @@ Backlog & progress tracker `vidgenie`.
     - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = 3 file reformatted; `mypy src` = Success, no issues found in 12 source files; `pytest -q` = **65 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
     - Live (uvicorn :8000, konfig deepseek-v4-flash dari settings DB): `POST /plan` narasi 3 kalimat → 303, 3 scene tersimpan di `data/vidgenie.db` (`plans`=1, `scenes`=3), preview menampilkan narasi verbatim + query visual + durasi 4.0/5.0/5.0 s.
     - Catatan: tabel `scenes` memakai `plan_id` (kolom `job_id` di SDD akan dipakai ARCH-003 saat jobs ada).
+
+- [x] **FEAT-008** — Render ffmpeg 9:16 (scale/crop, zoompan foto, concat/xfade, drawtext narasi, amix musik) + `render.log`
+  - Evidence:
+    - Files: `src/vidgenie/render.py` (`render_scenes`/`render_scene`: per-scene segmen MP4 720x1280@30fps via `_segment_cmd` — image/placeholder → loop+zoompan slow-zoom, video → scale/crop center + trim `duration_sec` + `fps`; narasi per scene via `drawtext=textfile` (file caption per segmen, posisi bawah emulated `w/h` style configurable); `_final_cmd` — gabung segmen dgn xfade fade 0.3s (offset kumulatif durasi−crossfade), audio: musik → `volume=0.15`+`atrim` total durasi, tanpa musik → `anullsrc` silent; encode h264 yuv420p + aac `-shortest`; error → tulis `render.log` berisi command + stderr), `src/vidgenie/config.py` (`outputs_dir` = `data/outputs`, `music_dir` = `data/assets/music` + `ensure_dirs`), `src/vidgenie/worker.py` (task `render` di BackgroundWorker: payload `{plan_id}` → muat PlanStore.composition → `render_scenes` → `finish(job_id, video_path=...)`).
+    - Tests (8 PASS): `tests/test_render.py` — segment cmd video (trim/crop/drawtext), image (zoompan/loop/drawtext), caption-only → placeholder; final cmd single (tanpa xfade) & multi (xfade offset benar) + anullsrc/−shortest; musik → volume/atrim; render e2e gambar nyata (ffmpeg lokal) 1 scene, 2 scene + musik mp3 nyata, caption-only placeholder → MP4 valid >0 byte.
+    - Verifikasi (.venv, ruff 0.16.8 / mypy 2.3.1 / pytest 9.1.1): `ruff check .` = All checks passed; `ruff format .` = applied; `mypy src` = Success, no issues found in 15 source files; `pytest -q` = **87 passed, 1 failed** (pra-eksisting `test_probe_video`, ffprobe SIGABRT).
+    - Live (uvicorn :8000): `POST /plan` → 303, `POST /plan/{id}/compose` → 303, submit job `render` → `done` + `video_path=data/outputs/{plan_id}.mp4`; hasil `ffprobe`: 720x1280 9:16, h264+aac, 30fps, duration ~durasi total − crossfade.
 
 - [x] **FEAT-007** — Search per scene + compose (top-k, anti-reuse, fallback caption-only)
   - Evidence:

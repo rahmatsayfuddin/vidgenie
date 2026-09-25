@@ -7,10 +7,13 @@ import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from vidgenie.config import Settings
 from vidgenie.embedding import Embedder
+from vidgenie.plan import PlanStore
+from vidgenie.render import render_scenes
 from vidgenie.storage import Storage
 
 JOB_KINDS = ("embed", "plan", "render")
@@ -134,6 +137,7 @@ class BackgroundWorker:
         self._pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="vg-job")
         self._tasks: dict[str, Callable[[JobStore, str, dict[str, Any]], None]] = {
             "embed": self._embed_task,
+            "render": self._render_task,
         }
 
     def submit(self, kind: str, payload: dict[str, Any]) -> str:
@@ -179,6 +183,38 @@ class BackgroundWorker:
         asset.embedding_id = asset.id
         self._storage.save_asset(asset)
         store.set_progress(job_id, 100, step="selesai")
+
+    def _render_task(self, store: JobStore, job_id: str, payload: dict[str, Any]) -> None:
+        plan_id = str(payload.get("plan_id") or "")
+        if not plan_id:
+            raise ValueError("plan_id wajib di payload render")
+        store.set_progress(job_id, 10, step="memuat scene")
+        plan_store = PlanStore(self._settings)
+        data = plan_store.load_plan(plan_id)
+        composed_by_idx = plan_store.load_composition(plan_id)
+        if data is None:
+            raise ValueError(f"plan tidak ditemukan: {plan_id}")
+        if not composed_by_idx:
+            raise ValueError("plan belum di-compose (jalankan compose dulu)")
+        composed = [composed_by_idx[i] for i in sorted(composed_by_idx)]
+        plan_store.close()
+
+        dest = self._settings.outputs_dir / f"{plan_id}.mp4"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        music = self._first_music()
+        store.set_progress(job_id, 25, step="render tiap scene")
+        result = render_scenes(self._storage, composed, dest, music_path=music)
+        if not result.ok:
+            raise ValueError(result.log or "render gagal")
+        store.set_progress(job_id, 95, step="menyimpan hasil")
+        if result.output is not None:
+            store.finish(job_id, video_path=str(result.output), step="selesai")
+
+    def _first_music(self) -> Path | None:
+        for ext in ("*.mp3", "*.m4a", "*.wav", "*.ogg"):
+            for path in sorted(self._settings.music_dir.glob(ext)):
+                return path
+        return None
 
     def shutdown(self) -> None:
         self._pool.shutdown(wait=False)

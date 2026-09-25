@@ -59,11 +59,25 @@ class Settings:
         return self.data_dir / "models"
 
     @property
+    def outputs_dir(self) -> Path:
+        return self.data_dir / "outputs"
+
+    @property
+    def music_dir(self) -> Path:
+        return self.data_dir / "assets" / "music"
+
+    @property
     def db_path(self) -> Path:
         return self.data_dir / "vidgenie.db"
 
     def ensure_dirs(self) -> None:
-        for d in (self.assets_dir, self.sidecars_dir, self.thumbs_dir, self.vectors_dir):
+        for d in (
+            self.assets_dir,
+            self.sidecars_dir,
+            self.thumbs_dir,
+            self.vectors_dir,
+            self.outputs_dir,
+        ):
             d.mkdir(parents=True, exist_ok=True)
 
     @classmethod
